@@ -35,6 +35,16 @@ def log_base_dir() -> Path:
     return Path.home() / "Desktop" / "日志"
 
 
+def iter_vendor_logs(vendor: str) -> list[Path]:
+    base = log_base_dir()
+    files = []
+    exact = base / f"{vendor}.log"
+    if exact.exists():
+        files.append(exact)
+    files.extend(sorted(base.glob(f"{vendor}_*.log")))
+    return files
+
+
 def parse_log_findings(vendor: str, path: Path) -> list[RiskFinding]:
     if not path.exists():
         return []
@@ -58,11 +68,11 @@ def parse_log_findings(vendor: str, path: Path) -> list[RiskFinding]:
 
 
 def build_risk_summary() -> RiskSummary:
-    base = log_base_dir()
-    findings = [
-        *parse_log_findings("synopsys", base / "synopsys.log"),
-        *parse_log_findings("ansys", base / "ansys.log"),
-    ]
+    findings = []
+    for p in iter_vendor_logs("synopsys"):
+        findings.extend(parse_log_findings("synopsys", p))
+    for p in iter_vendor_logs("ansys"):
+        findings.extend(parse_log_findings("ansys", p))
 
     critical = sum(1 for f in findings if f.severity == "critical")
     high = sum(1 for f in findings if f.severity == "high")
@@ -73,8 +83,8 @@ def build_risk_summary() -> RiskSummary:
 
 def derive_synopsys_activity_from_log() -> tuple[dict[str, int], dict[str, list[str]]]:
     """Compute current in-use count and active users per feature from synopsys OUT/IN events."""
-    p = log_base_dir() / "synopsys.log"
-    if not p.exists():
+    files = iter_vendor_logs("synopsys")
+    if not files:
         return {}, {}
 
     # Example lines:
@@ -85,24 +95,25 @@ def derive_synopsys_activity_from_log() -> tuple[dict[str, int], dict[str, list[
 
     active_by_feature: dict[str, dict[str, int]] = {}
 
-    for line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
-        m_out = out_re.search(line)
-        if m_out:
-            feat = m_out.group(1).strip()
-            user = m_out.group(2).strip()
-            per_user = active_by_feature.setdefault(feat, {})
-            per_user[user] = per_user.get(user, 0) + 1
-            continue
+    for p in files:
+        for line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+            m_out = out_re.search(line)
+            if m_out:
+                feat = m_out.group(1).strip()
+                user = m_out.group(2).strip()
+                per_user = active_by_feature.setdefault(feat, {})
+                per_user[user] = per_user.get(user, 0) + 1
+                continue
 
-        m_in = in_re.search(line)
-        if m_in:
-            feat = m_in.group(1).strip()
-            user = m_in.group(2).strip()
-            per_user = active_by_feature.setdefault(feat, {})
-            if per_user.get(user, 0) > 0:
-                per_user[user] -= 1
-                if per_user[user] <= 0:
-                    per_user.pop(user, None)
+            m_in = in_re.search(line)
+            if m_in:
+                feat = m_in.group(1).strip()
+                user = m_in.group(2).strip()
+                per_user = active_by_feature.setdefault(feat, {})
+                if per_user.get(user, 0) > 0:
+                    per_user[user] -= 1
+                    if per_user[user] <= 0:
+                        per_user.pop(user, None)
 
     used: dict[str, int] = {}
     users: dict[str, list[str]] = {}
@@ -415,8 +426,21 @@ async def upload_license(file: UploadFile = File(...), db: Session = Depends(get
     vendor_name = "synopsys"
     if daemon_line:
         p = daemon_line.split()
-        if len(p) >= 2 and "snpslmd" in p[1].lower():
+        daemon_token = (p[1].lower() if len(p) >= 2 else "")
+        if "snpslmd" in daemon_token:
             vendor_name = "synopsys"
+        elif "cdslmd" in daemon_token or "cds" in daemon_token:
+            vendor_name = "cadence"
+        elif "mgcld" in daemon_token or "mentor" in daemon_token:
+            vendor_name = "mentor"
+
+    fn = (file.filename or "").lower()
+    if fn.startswith("cadence_"):
+        vendor_name = "cadence"
+    elif fn.startswith("mentor_"):
+        vendor_name = "mentor"
+    elif fn.startswith("synopsys_"):
+        vendor_name = "synopsys"
 
     vendor = db.query(Vendor).filter(func.lower(Vendor.name) == vendor_name).first()
     if not vendor:
@@ -576,12 +600,15 @@ def license_keys(vendor: str = "all", keyword: str = "", limit: int = 500, db: S
 
 @router.get("/license-logs")
 def license_logs(vendor: str = "all", keyword: str = "", mode: str = "full", limit: int = 5000):
-    base = log_base_dir()
     files = []
     if vendor in {"all", "synopsys"}:
-        files.append(("synopsys", base / "synopsys.log"))
+        files.extend([("synopsys", p) for p in iter_vendor_logs("synopsys")])
     if vendor in {"all", "ansys"}:
-        files.append(("ansys", base / "ansys.log"))
+        files.extend([("ansys", p) for p in iter_vendor_logs("ansys")])
+    if vendor in {"all", "cadence"}:
+        files.extend([("cadence", p) for p in iter_vendor_logs("cadence")])
+    if vendor in {"all", "mentor"}:
+        files.extend([("mentor", p) for p in iter_vendor_logs("mentor")])
 
     patterns = ["error", "denied", "failed", "tampered", "unsupported", "cannot", "refused", "expired"]
     keyword = (keyword or "").strip().lower()

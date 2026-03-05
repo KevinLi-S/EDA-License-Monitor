@@ -1,6 +1,33 @@
 # EDA License Hub 生产部署手册（CentOS 7.9 / Rocky 8.10）
 
-> 目标：在内网 Linux 服务器部署 `License Portal`，接入真实 Synopsys license/dat/log 数据。
+> 目标：在内网 Linux 服务器部署 `License Portal`，接入真实 license/dat/log 数据。
+
+## 一键傻瓜式部署（推荐，按固定目录命名）
+
+适配你的固定布局：
+
+- Synopsys: `/eda/env/license/synopsys_lic01.dat`, `/eda/env/license/synopsys_lic02.dat`
+- Cadence: `/eda/env/license/cadence_lic01.dat`, `/eda/env/license/cadence_lic02.dat`
+- Mentor: `/eda/env/license/mentor_lic01.dat`, `/eda/env/license/mentor_lic02.dat`
+- Logs: `/eda/env/license/log/*.log`（支持 `synopsys_lic01.log` 这类）
+
+部署步骤（离线物理机）：
+
+```bash
+# 1) 解压发布包到 /opt/license-portal
+mkdir -p /opt/license-portal
+cd /opt/license-portal
+tar -xzf license-portal-release.tar.gz --strip-components=1
+
+# 2) 执行一键部署（需root）
+chmod +x deploy/*.sh
+./deploy/oneclick_prod_install.sh
+```
+
+可选手工刷新（后续更新 license 文件后执行）：
+```bash
+./deploy/sync_fixed_layout.sh
+```
 
 ## 1. 部署模式说明
 
