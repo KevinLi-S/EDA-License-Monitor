@@ -71,29 +71,46 @@ def build_risk_summary() -> RiskSummary:
     return RiskSummary(critical=critical, high=high, medium=medium, findings=findings)
 
 
-def derive_synopsys_used_from_log() -> dict[str, int]:
-    """Compute current in-use count per feature from OUT/IN events in synopsys.log."""
+def derive_synopsys_activity_from_log() -> tuple[dict[str, int], dict[str, list[str]]]:
+    """Compute current in-use count and active users per feature from synopsys OUT/IN events."""
     p = log_base_dir() / "synopsys.log"
     if not p.exists():
-        return {}
+        return {}, {}
 
-    used: dict[str, int] = {}
-    out_re = re.compile(r'OUT:\s+"([^"]+)"', re.IGNORECASE)
-    in_re = re.compile(r'IN:\s+"([^"]+)"', re.IGNORECASE)
+    # Example lines:
+    # 3:58:19 (snpslmd) OUT: "3D" user@host  [14]
+    # 4:03:01 (snpslmd) IN:  "3D" user@host  [14]
+    out_re = re.compile(r'OUT:\s+"([^"]+)"\s+([^\s]+)', re.IGNORECASE)
+    in_re = re.compile(r'IN:\s+"([^"]+)"\s+([^\s]+)', re.IGNORECASE)
+
+    active_by_feature: dict[str, dict[str, int]] = {}
 
     for line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
         m_out = out_re.search(line)
         if m_out:
-            f = m_out.group(1).strip()
-            used[f] = used.get(f, 0) + 1
+            feat = m_out.group(1).strip()
+            user = m_out.group(2).strip()
+            per_user = active_by_feature.setdefault(feat, {})
+            per_user[user] = per_user.get(user, 0) + 1
             continue
 
         m_in = in_re.search(line)
         if m_in:
-            f = m_in.group(1).strip()
-            used[f] = max(used.get(f, 0) - 1, 0)
+            feat = m_in.group(1).strip()
+            user = m_in.group(2).strip()
+            per_user = active_by_feature.setdefault(feat, {})
+            if per_user.get(user, 0) > 0:
+                per_user[user] -= 1
+                if per_user[user] <= 0:
+                    per_user.pop(user, None)
 
-    return used
+    used: dict[str, int] = {}
+    users: dict[str, list[str]] = {}
+    for feat, per_user in active_by_feature.items():
+        used[feat] = sum(per_user.values())
+        users[feat] = sorted(per_user.keys())
+
+    return used, users
 
 
 @router.get("/health")
@@ -426,7 +443,7 @@ async def upload_license(file: UploadFile = File(...), db: Session = Depends(get
     created = 0
     in_regex = re.compile(r"^INCREMENT\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)", re.IGNORECASE)
     feat_regex = re.compile(r"^FEATURE\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)", re.IGNORECASE)
-    synopsys_used_map = derive_synopsys_used_from_log() if vendor_name == "synopsys" else {}
+    synopsys_used_map, _synopsys_users_map = derive_synopsys_activity_from_log() if vendor_name == "synopsys" else ({}, {})
 
     for line in lines:
         m = in_regex.match(line) or feat_regex.match(line)
@@ -499,6 +516,8 @@ async def upload_license(file: UploadFile = File(...), db: Session = Depends(get
 
 @router.get("/license-keys")
 def license_keys(vendor: str = "all", keyword: str = "", limit: int = 500, db: Session = Depends(get_db)):
+    syn_used, syn_users = derive_synopsys_activity_from_log()
+
     q = db.query(LicenseKeyRecord)
     if vendor != "all":
         q = q.filter(func.lower(LicenseKeyRecord.vendor) == vendor.lower())
@@ -508,19 +527,25 @@ def license_keys(vendor: str = "all", keyword: str = "", limit: int = 500, db: S
 
     records = q.order_by(desc(LicenseKeyRecord.collected_at)).limit(max(1, min(limit, 5000))).all()
     if records:
-        return [
-            {
-                "id": r.id,
-                "feature": r.feature,
-                "vendor": r.vendor,
-                "version": r.version,
-                "total": r.total,
-                "used": r.used,
-                "expiry": r.expiry,
-                "server": r.server,
-            }
-            for r in records
-        ]
+        out = []
+        for r in records:
+            users = syn_users.get(r.feature, []) if (r.vendor or '').lower() == 'synopsys' else []
+            used_now = syn_used.get(r.feature, r.used) if (r.vendor or '').lower() == 'synopsys' else r.used
+            out.append(
+                {
+                    "id": r.id,
+                    "feature": r.feature,
+                    "vendor": r.vendor,
+                    "version": r.version,
+                    "total": r.total,
+                    "used": min(max(used_now, 0), r.total),
+                    "expiry": r.expiry,
+                    "server": r.server,
+                    "active_user_count": len(users),
+                    "active_users": users,
+                }
+            )
+        return out
 
     rows = (
         db.query(FeatureSnapshot, Feature.name, LicenseServer.name, Vendor.name)
@@ -542,6 +567,8 @@ def license_keys(vendor: str = "all", keyword: str = "", limit: int = 500, db: S
             "used": snap.used,
             "expiry": "N/A",
             "server": s_name,
+            "active_user_count": 0,
+            "active_users": [],
         }
         for idx, (snap, f_name, s_name, v_name) in enumerate(rows, start=1)
     ]
