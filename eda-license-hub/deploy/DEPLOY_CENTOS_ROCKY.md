@@ -14,14 +14,15 @@
 部署步骤（离线物理机）：
 
 ```bash
-# 1) 解压发布包到 /opt/license-portal
+# 1) 解压离线全量包到 /opt/license-portal
 mkdir -p /opt/license-portal
 cd /opt/license-portal
-tar -xzf license-portal-release.tar.gz --strip-components=1
+tar -xzf centos7.9-x86_64.tar.gz --strip-components=1
+# Rocky 使用 rocky8.10-x86_64.tar.gz
 
-# 2) 执行一键部署（需root）
+# 2) 执行一键离线部署（需root）
 chmod +x deploy/*.sh
-./deploy/oneclick_prod_install.sh
+./deploy/offline_oneclick.sh
 ```
 
 可选手工刷新（后续更新 license 文件后执行）：
