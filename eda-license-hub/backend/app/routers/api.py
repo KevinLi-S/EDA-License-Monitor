@@ -94,36 +94,52 @@ def health():
 
 @router.get("/dashboard", response_model=DashboardSummary)
 def dashboard(db: Session = Depends(get_db)):
-    top_rows = (
-        db.query(
-            Feature.name,
-            FeatureSnapshot.total,
-            FeatureSnapshot.used,
-            FeatureSnapshot.free,
-            LicenseServer.name,
-            Vendor.name,
-            FeatureSnapshot.collected_at,
-        )
-        .join(Feature, Feature.id == FeatureSnapshot.feature_id)
-        .join(LicenseServer, LicenseServer.id == FeatureSnapshot.server_id)
-        .join(Vendor, Vendor.id == Feature.vendor_id)
-        .order_by(desc(FeatureSnapshot.used))
-        .limit(10)
-        .all()
-    )
+    key_rows = db.query(LicenseKeyRecord).order_by(desc(LicenseKeyRecord.used)).limit(10).all()
 
-    top_busy = [
-        FeaturePoint(
-            feature=r[0],
-            total=r[1],
-            used=r[2],
-            free=r[3],
-            server=r[4],
-            vendor=r[5],
-            collected_at=r[6],
+    if key_rows:
+        top_busy = [
+            FeaturePoint(
+                feature=r.feature,
+                total=r.total,
+                used=r.used,
+                free=max(r.total - r.used, 0),
+                server=r.server,
+                vendor=r.vendor,
+                collected_at=r.collected_at,
+            )
+            for r in key_rows
+        ]
+    else:
+        top_rows = (
+            db.query(
+                Feature.name,
+                FeatureSnapshot.total,
+                FeatureSnapshot.used,
+                FeatureSnapshot.free,
+                LicenseServer.name,
+                Vendor.name,
+                FeatureSnapshot.collected_at,
+            )
+            .join(Feature, Feature.id == FeatureSnapshot.feature_id)
+            .join(LicenseServer, LicenseServer.id == FeatureSnapshot.server_id)
+            .join(Vendor, Vendor.id == Feature.vendor_id)
+            .order_by(desc(FeatureSnapshot.used))
+            .limit(10)
+            .all()
         )
-        for r in top_rows
-    ]
+
+        top_busy = [
+            FeaturePoint(
+                feature=r[0],
+                total=r[1],
+                used=r[2],
+                free=r[3],
+                server=r[4],
+                vendor=r[5],
+                collected_at=r[6],
+            )
+            for r in top_rows
+        ]
 
     return DashboardSummary(
         vendor_count=db.query(func.count(Vendor.id)).scalar() or 0,
