@@ -1,10 +1,15 @@
 import { Table, Tag } from 'antd'
 import { useEffect, useState } from 'react'
-import api from '../api'
+import api, { useMock } from '../api'
+import { mockAlerts } from '../mockData'
 
 export default function AlertsPage() {
   const [rows, setRows] = useState([])
   useEffect(() => {
+    if (useMock) {
+      setRows(mockAlerts)
+      return
+    }
     api.get('/alerts').then((r) => setRows(r.data))
   }, [])
 
