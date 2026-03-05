@@ -17,3 +17,7 @@ class DashboardSummary(BaseModel):
     server_count: int
     open_alerts: int
     top_busy_features: list[FeaturePoint]
+
+
+class ServerActionRequest(BaseModel):
+    action: str

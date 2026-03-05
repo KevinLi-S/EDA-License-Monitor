@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models.entities import Alert, Feature, FeatureSnapshot, LicenseServer, Vendor
-from app.schemas import DashboardSummary, FeaturePoint
+from app.schemas import DashboardSummary, FeaturePoint, ServerActionRequest
 
 router = APIRouter(prefix="/api", tags=["api"])
 
@@ -70,6 +70,29 @@ def servers(db: Session = Depends(get_db)):
         }
         for s, v in rows
     ]
+
+
+@router.post("/servers/{server_id}/action")
+def server_action(server_id: int, req: ServerActionRequest, db: Session = Depends(get_db)):
+    server = db.query(LicenseServer).filter(LicenseServer.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="server not found")
+
+    action = req.action.lower().strip()
+    if action not in {"start", "stop", "restart"}:
+        raise HTTPException(status_code=400, detail="action must be start|stop|restart")
+
+    if action == "start":
+        server.status = "online"
+    elif action == "stop":
+        server.status = "offline"
+    else:
+        server.status = "degraded"
+
+    db.add(server)
+    db.commit()
+
+    return {"ok": True, "server_id": server_id, "action": action, "status": server.status}
 
 
 @router.get("/features")
