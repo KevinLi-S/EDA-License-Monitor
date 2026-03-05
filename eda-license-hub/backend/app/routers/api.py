@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc, func
@@ -6,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models.entities import Alert, Feature, FeatureSnapshot, LicenseServer, ServerActionLog, Vendor
-from app.schemas import DashboardSummary, FeaturePoint, ServerActionRequest, ServerUpsertRequest
+from app.schemas import DashboardSummary, FeaturePoint, RiskSummary, RiskFinding, ServerActionRequest, ServerUpsertRequest
 
 router = APIRouter(prefix="/api", tags=["api"])
 
@@ -22,6 +23,42 @@ def build_vendor_command(vendor: str, host: str, port: int, action: str) -> str:
     if vendor == "ansys":
         return f"anslic_admin -{action} {host}:{port}"
     return f"licensectl --vendor {vendor} {action} --server {host}:{port}"
+
+
+def parse_log_findings(vendor: str, path: Path) -> list[RiskFinding]:
+    if not path.exists():
+        return []
+
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    findings: list[RiskFinding] = []
+
+    checks = [
+        ("tampered", "critical", "License integrity warning detected", "CVD License file has been Tampered"),
+        ("encrypted communication disabled", "high", "Ecomms disabled", "Encrypted Communication disabled"),
+        ("external filters are off", "high", "External filters disabled", "EXTERNAL FILTERS are OFF"),
+        ("options file used: none", "medium", "No options file", "Options file used: None"),
+    ]
+
+    low_text = text.lower()
+    for key, severity, issue, detail in checks:
+        if key in low_text:
+            findings.append(RiskFinding(vendor=vendor, severity=severity, issue=issue, detail=detail))
+
+    return findings
+
+
+def build_risk_summary() -> RiskSummary:
+    base = Path.home() / "Desktop" / "日志"
+    findings = [
+        *parse_log_findings("synopsys", base / "synopsys.log"),
+        *parse_log_findings("ansys", base / "ansys.log"),
+    ]
+
+    critical = sum(1 for f in findings if f.severity == "critical")
+    high = sum(1 for f in findings if f.severity == "high")
+    medium = sum(1 for f in findings if f.severity == "medium")
+
+    return RiskSummary(critical=critical, high=high, medium=medium, findings=findings)
 
 
 @router.get("/health")
@@ -67,6 +104,7 @@ def dashboard(db: Session = Depends(get_db)):
         server_count=db.query(func.count(LicenseServer.id)).scalar() or 0,
         open_alerts=db.query(func.count(Alert.id)).filter(Alert.status == "open").scalar() or 0,
         top_busy_features=top_busy,
+        risk_summary=build_risk_summary(),
     )
 
 

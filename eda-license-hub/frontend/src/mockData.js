@@ -6,7 +6,18 @@ export const mockDashboard = {
     { feature: 'VCS', vendor: 'synopsys', server: 'snps-lic-01', total: 100, used: 83, free: 17, collected_at: '2026-03-05T12:00:00+08:00' },
     { feature: 'DC', vendor: 'synopsys', server: 'snps-lic-01', total: 40, used: 36, free: 4, collected_at: '2026-03-05T12:00:00+08:00' },
     { feature: 'Virtuoso', vendor: 'cadence', server: 'cdns-lic-01', total: 60, used: 41, free: 19, collected_at: '2026-03-05T12:00:00+08:00' }
-  ]
+  ],
+  risk_summary: {
+    critical: 1,
+    high: 2,
+    medium: 1,
+    findings: [
+      { vendor: 'ansys', severity: 'critical', issue: 'License integrity warning detected', detail: 'CVD License file has been Tampered' },
+      { vendor: 'ansys', severity: 'high', issue: 'Ecomms disabled', detail: 'Encrypted Communication disabled' },
+      { vendor: 'ansys', severity: 'high', issue: 'External filters disabled', detail: 'EXTERNAL FILTERS are OFF' },
+      { vendor: 'synopsys', severity: 'medium', issue: 'No options file', detail: 'Options file used: None' }
+    ]
+  }
 }
 
 export const mockServers = [
