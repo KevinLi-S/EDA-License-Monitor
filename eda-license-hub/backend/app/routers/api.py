@@ -1,10 +1,12 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models.entities import Alert, Feature, FeatureSnapshot, LicenseServer, Vendor
-from app.schemas import DashboardSummary, FeaturePoint, ServerActionRequest
+from app.models.entities import Alert, Feature, FeatureSnapshot, LicenseServer, ServerActionLog, Vendor
+from app.schemas import DashboardSummary, FeaturePoint, ServerActionRequest, ServerUpsertRequest
 
 router = APIRouter(prefix="/api", tags=["api"])
 
@@ -72,6 +74,59 @@ def servers(db: Session = Depends(get_db)):
     ]
 
 
+@router.post("/servers")
+def create_server(req: ServerUpsertRequest, db: Session = Depends(get_db)):
+    vendor = db.query(Vendor).filter(func.lower(Vendor.name) == req.vendor.lower()).first()
+    if not vendor:
+        vendor = Vendor(name=req.vendor.lower())
+        db.add(vendor)
+        db.flush()
+
+    server = LicenseServer(
+        vendor_id=vendor.id,
+        name=req.name,
+        host=req.host,
+        port=req.port,
+        status="offline",
+        last_seen_at=datetime.utcnow(),
+    )
+    db.add(server)
+    db.commit()
+    db.refresh(server)
+    return {"ok": True, "id": server.id}
+
+
+@router.put("/servers/{server_id}")
+def update_server(server_id: int, req: ServerUpsertRequest, db: Session = Depends(get_db)):
+    server = db.query(LicenseServer).filter(LicenseServer.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="server not found")
+
+    vendor = db.query(Vendor).filter(func.lower(Vendor.name) == req.vendor.lower()).first()
+    if not vendor:
+        vendor = Vendor(name=req.vendor.lower())
+        db.add(vendor)
+        db.flush()
+
+    server.name = req.name
+    server.vendor_id = vendor.id
+    server.host = req.host
+    server.port = req.port
+    db.add(server)
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/servers/{server_id}")
+def delete_server(server_id: int, db: Session = Depends(get_db)):
+    server = db.query(LicenseServer).filter(LicenseServer.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="server not found")
+    db.delete(server)
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/servers/{server_id}/action")
 def server_action(server_id: int, req: ServerActionRequest, db: Session = Depends(get_db)):
     server = db.query(LicenseServer).filter(LicenseServer.id == server_id).first()
@@ -84,15 +139,44 @@ def server_action(server_id: int, req: ServerActionRequest, db: Session = Depend
 
     if action == "start":
         server.status = "online"
+        msg = "service started"
     elif action == "stop":
         server.status = "offline"
+        msg = "service stopped"
     else:
-        server.status = "degraded"
+        server.status = "restarting"
+        msg = "service restarting"
 
+    server.last_seen_at = datetime.utcnow()
     db.add(server)
+    db.flush()
+
+    db.add(ServerActionLog(server_id=server.id, action=action, status_after=server.status, message=msg))
     db.commit()
 
     return {"ok": True, "server_id": server_id, "action": action, "status": server.status}
+
+
+@router.get("/server-actions")
+def server_actions(db: Session = Depends(get_db)):
+    rows = (
+        db.query(ServerActionLog, LicenseServer.name)
+        .join(LicenseServer, LicenseServer.id == ServerActionLog.server_id)
+        .order_by(desc(ServerActionLog.created_at))
+        .limit(100)
+        .all()
+    )
+    return [
+        {
+            "id": log.id,
+            "server": server_name,
+            "action": log.action,
+            "status_after": log.status_after,
+            "message": log.message,
+            "created_at": log.created_at,
+        }
+        for log, server_name in rows
+    ]
 
 
 @router.get("/features")

@@ -15,6 +15,11 @@ export const mockServers = [
   { id: 3, name: 'mnt-lic-01', vendor: 'mentor', host: '10.0.0.13', port: 1717, status: 'degraded', last_seen_at: '2026-03-05 11:59:00' }
 ]
 
+export const mockServerActions = [
+  { id: 1, server: 'snps-lic-01', action: 'restart', status_after: 'restarting', message: 'service restarting', created_at: '2026-03-05 12:08:00' },
+  { id: 2, server: 'cdns-lic-01', action: 'start', status_after: 'online', message: 'service started', created_at: '2026-03-05 11:58:00' }
+]
+
 export const mockFeatures = [
   { feature: 'VCS', vendor: 'synopsys', server: 'snps-lic-01', total: 100, used: 83, free: 17, collected_at: '2026-03-05 12:00:00' },
   { feature: 'DC', vendor: 'synopsys', server: 'snps-lic-01', total: 40, used: 36, free: 4, collected_at: '2026-03-05 12:00:00' },

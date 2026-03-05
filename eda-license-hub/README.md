@@ -4,7 +4,8 @@ Web dashboard for monitoring EDA license servers (Synopsys, Cadence, Mentor, Ans
 
 ## MVP scope
 - Dashboard: vendor/server health + top busy features
-- Servers page: status + last collection time + Start/Stop/Restart actions
+- Servers page: status + last collection time + Start/Stop/Restart actions + Add/Edit/Delete server
+- Operation logs panel for server commands
 - Features page: total/used/free snapshots
 - Alerts page: low-free + server-down alerts
 

@@ -21,3 +21,10 @@ class DashboardSummary(BaseModel):
 
 class ServerActionRequest(BaseModel):
     action: str
+
+
+class ServerUpsertRequest(BaseModel):
+    name: str
+    vendor: str
+    host: str
+    port: int

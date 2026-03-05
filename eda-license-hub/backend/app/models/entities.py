@@ -55,3 +55,14 @@ class Alert(Base):
     message: Mapped[str] = mapped_column(String(256))
     status: Mapped[str] = mapped_column(String(32), default="open")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ServerActionLog(Base):
+    __tablename__ = "server_action_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey("license_servers.id"))
+    action: Mapped[str] = mapped_column(String(32), index=True)
+    status_after: Mapped[str] = mapped_column(String(32))
+    message: Mapped[str] = mapped_column(String(256), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
