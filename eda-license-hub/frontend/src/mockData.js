@@ -41,3 +41,10 @@ export const mockAlerts = [
   { id: 1, type: 'low_free', severity: 'high', message: 'DC free licenses < 10', status: 'open', created_at: '2026-03-05 11:58:00' },
   { id: 2, type: 'server_down', severity: 'high', message: 'ansys-lic-02 heartbeat missing', status: 'open', created_at: '2026-03-05 11:30:00' }
 ]
+
+export const mockLicenseKeys = [
+  { id: 1, vendor: 'synopsys', feature: 'VCSCompiler_Net', version: '2023.09', total: 100, used: 83, expiry: '2026-12-31', server: 'snps-lic-01' },
+  { id: 2, vendor: 'synopsys', feature: 'Verdi', version: '2023.09', total: 30, used: 12, expiry: '2026-10-31', server: 'snps-lic-01' },
+  { id: 3, vendor: 'ansys', feature: 'redhawk', version: '2024R1', total: 50, used: 44, expiry: '2026-08-15', server: 'ansys-lic-01' },
+  { id: 4, vendor: 'cadence', feature: 'Virtuoso', version: 'ICADVM20.1', total: 60, used: 41, expiry: '2027-01-30', server: 'cdns-lic-01' }
+]

@@ -292,6 +292,49 @@ def features(db: Session = Depends(get_db)):
     ]
 
 
+@router.get("/license-keys")
+def license_keys(db: Session = Depends(get_db)):
+    rows = (
+        db.query(FeatureSnapshot, Feature.name, LicenseServer.name, Vendor.name)
+        .join(Feature, Feature.id == FeatureSnapshot.feature_id)
+        .join(LicenseServer, LicenseServer.id == FeatureSnapshot.server_id)
+        .join(Vendor, Vendor.id == Feature.vendor_id)
+        .order_by(desc(FeatureSnapshot.collected_at))
+        .limit(200)
+        .all()
+    )
+
+    vendor_versions = {
+        "synopsys": "2023.09",
+        "cadence": "ICADVM20.1",
+        "mentor": "2022.4",
+        "ansys": "2024R1",
+    }
+    vendor_expiry = {
+        "synopsys": "2026-12-31",
+        "cadence": "2027-01-30",
+        "mentor": "2026-11-15",
+        "ansys": "2026-08-15",
+    }
+
+    out = []
+    for idx, (snap, f_name, s_name, v_name) in enumerate(rows, start=1):
+        v = (v_name or "").lower()
+        out.append(
+            {
+                "id": idx,
+                "feature": f_name,
+                "vendor": v,
+                "version": vendor_versions.get(v, "N/A"),
+                "total": snap.total,
+                "used": snap.used,
+                "expiry": vendor_expiry.get(v, "N/A"),
+                "server": s_name,
+            }
+        )
+    return out
+
+
 @router.get("/alerts")
 def alerts(db: Session = Depends(get_db)):
     rows = db.query(Alert).order_by(desc(Alert.created_at)).all()
