@@ -5,6 +5,7 @@ import ServersPage from './pages/ServersPage'
 import FeaturesPage from './pages/FeaturesPage'
 import AlertsPage from './pages/AlertsPage'
 import LicenseKeysPage from './pages/LicenseKeysPage'
+import LogsPage from './pages/LogsPage'
 
 const { Header, Content, Sider } = Layout
 
@@ -27,6 +28,7 @@ export default function App() {
             { key: '/servers', label: <Link to="/servers">🖥️ Servers</Link> },
             { key: '/features', label: <Link to="/features">🧩 Features</Link> },
             { key: '/license-keys', label: <Link to="/license-keys">🔑 License Keys</Link> },
+            { key: '/logs', label: <Link to="/logs">📜 Logs</Link> },
             { key: '/alerts', label: <Link to="/alerts">🚨 Alerts</Link> },
           ]}
         />
@@ -53,6 +55,7 @@ export default function App() {
             <Route path="/servers" element={<ServersPage />} />
             <Route path="/features" element={<FeaturesPage />} />
             <Route path="/license-keys" element={<LicenseKeysPage />} />
+            <Route path="/logs" element={<LogsPage />} />
             <Route path="/alerts" element={<AlertsPage />} />
           </Routes>
         </Content>

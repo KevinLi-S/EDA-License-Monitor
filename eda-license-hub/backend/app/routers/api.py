@@ -412,6 +412,33 @@ def license_keys(db: Session = Depends(get_db)):
     return out
 
 
+@router.get("/license-logs")
+def license_logs(vendor: str = "all", keyword: str = ""):
+    base = Path.home() / "Desktop" / "日志"
+    files = []
+    if vendor in {"all", "synopsys"}:
+        files.append(("synopsys", base / "synopsys.log"))
+    if vendor in {"all", "ansys"}:
+        files.append(("ansys", base / "ansys.log"))
+
+    patterns = ["error", "denied", "failed", "tampered", "unsupported", "cannot", "refused", "expired"]
+    keyword = (keyword or "").strip().lower()
+
+    out = []
+    for v, p in files:
+        if not p.exists():
+            continue
+        lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
+        for i, line in enumerate(lines, start=1):
+            low = line.lower()
+            match_error = any(k in low for k in patterns)
+            match_keyword = (not keyword) or (keyword in low)
+            if match_error and match_keyword:
+                out.append({"id": f"{v}-{i}", "vendor": v, "line": i, "content": line.strip()[:500]})
+
+    return out[-500:][::-1]
+
+
 @router.get("/alerts")
 def alerts(db: Session = Depends(get_db)):
     rows = db.query(Alert).order_by(desc(Alert.created_at)).all()
