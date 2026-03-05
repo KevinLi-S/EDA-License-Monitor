@@ -11,6 +11,19 @@ from app.schemas import DashboardSummary, FeaturePoint, ServerActionRequest, Ser
 router = APIRouter(prefix="/api", tags=["api"])
 
 
+def build_vendor_command(vendor: str, host: str, port: int, action: str) -> str:
+    vendor = vendor.lower()
+    if vendor == "synopsys":
+        return f"snpslmdctl {action} --server {host}:{port}"
+    if vendor == "cadence":
+        return f"cdslmdctl {action} --server {host}:{port}"
+    if vendor == "mentor":
+        return f"mgcldctl {action} --server {host}:{port}"
+    if vendor == "ansys":
+        return f"anslic_admin -{action} {host}:{port}"
+    return f"licensectl --vendor {vendor} {action} --server {host}:{port}"
+
+
 @router.get("/health")
 def health():
     return {"status": "ok"}
@@ -127,15 +140,53 @@ def delete_server(server_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
-@router.post("/servers/{server_id}/action")
-def server_action(server_id: int, req: ServerActionRequest, db: Session = Depends(get_db)):
-    server = db.query(LicenseServer).filter(LicenseServer.id == server_id).first()
-    if not server:
+@router.get("/servers/{server_id}/action-preview")
+def server_action_preview(server_id: int, action: str, db: Session = Depends(get_db)):
+    server_vendor = (
+        db.query(LicenseServer, Vendor.name)
+        .join(Vendor, Vendor.id == LicenseServer.vendor_id)
+        .filter(LicenseServer.id == server_id)
+        .first()
+    )
+    if not server_vendor:
         raise HTTPException(status_code=404, detail="server not found")
 
+    server, vendor_name = server_vendor
+    action = action.lower().strip()
+    if action not in {"start", "stop", "restart"}:
+        raise HTTPException(status_code=400, detail="action must be start|stop|restart")
+
+    cmd = build_vendor_command(vendor_name, server.host, server.port, action)
+    return {"server_id": server_id, "vendor": vendor_name, "action": action, "command": cmd}
+
+
+@router.post("/servers/{server_id}/action")
+def server_action(server_id: int, req: ServerActionRequest, db: Session = Depends(get_db)):
+    server_vendor = (
+        db.query(LicenseServer, Vendor.name)
+        .join(Vendor, Vendor.id == LicenseServer.vendor_id)
+        .filter(LicenseServer.id == server_id)
+        .first()
+    )
+    if not server_vendor:
+        raise HTTPException(status_code=404, detail="server not found")
+
+    server, vendor_name = server_vendor
     action = req.action.lower().strip()
     if action not in {"start", "stop", "restart"}:
         raise HTTPException(status_code=400, detail="action must be start|stop|restart")
+
+    cmd = build_vendor_command(vendor_name, server.host, server.port, action)
+    if req.dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "server_id": server_id,
+            "action": action,
+            "status": server.status,
+            "command": cmd,
+            "message": "Dry run only. No real execution.",
+        }
 
     if action == "start":
         server.status = "online"
@@ -151,10 +202,10 @@ def server_action(server_id: int, req: ServerActionRequest, db: Session = Depend
     db.add(server)
     db.flush()
 
-    db.add(ServerActionLog(server_id=server.id, action=action, status_after=server.status, message=msg))
+    db.add(ServerActionLog(server_id=server.id, action=action, status_after=server.status, message=f"{msg}; cmd={cmd}"))
     db.commit()
 
-    return {"ok": True, "server_id": server_id, "action": action, "status": server.status}
+    return {"ok": True, "dry_run": False, "server_id": server_id, "action": action, "status": server.status, "command": cmd}
 
 
 @router.get("/server-actions")

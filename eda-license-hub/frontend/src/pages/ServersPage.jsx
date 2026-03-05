@@ -2,6 +2,7 @@ import {
   Button,
   Card,
   Col,
+  Descriptions,
   Form,
   Input,
   InputNumber,
@@ -9,6 +10,7 @@ import {
   Popconfirm,
   Row,
   Space,
+  Switch,
   Table,
   Tag,
   Typography,
@@ -29,6 +31,9 @@ export default function ServersPage() {
   const [actionRows, setActionRows] = useState([])
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(null)
+  const [dryRun, setDryRun] = useState(true)
+  const [preview, setPreview] = useState(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const [form] = Form.useForm()
 
   const vendorOptions = useMemo(() => ['synopsys', 'cadence', 'mentor', 'ansys'], [])
@@ -74,13 +79,28 @@ export default function ServersPage() {
     message.success(`Mock action executed: ${action}`)
   }
 
+  const openPreview = async (row, action) => {
+    if (useMock) {
+      setPreview({ server_id: row.id, vendor: row.vendor, action, command: `mockctl ${action} --server ${row.host}:${row.port}` })
+      setPreviewOpen(true)
+      return
+    }
+    const r = await api.get(`/servers/${row.id}/action-preview`, { params: { action } })
+    setPreview(r.data)
+    setPreviewOpen(true)
+  }
+
   const runAction = async (row, action) => {
     if (useMock) {
       applyActionLocal(row.id, action)
       return
     }
-    await api.post(`/servers/${row.id}/action`, { action })
-    message.success(`${action} command sent`)
+    const res = await api.post(`/servers/${row.id}/action`, { action, dry_run: dryRun })
+    if (res.data?.dry_run) {
+      message.info(`Dry run: ${action} previewed, no execution`)
+    } else {
+      message.success(`${action} command sent`)
+    }
     load()
   }
 
@@ -150,7 +170,13 @@ export default function ServersPage() {
       <Col span={16}>
         <Card
           title="License Servers"
-          extra={<Button type="primary" onClick={onCreate}>Add Server</Button>}
+          extra={(
+            <Space>
+              <span>Dry Run</span>
+              <Switch checked={dryRun} onChange={setDryRun} />
+              <Button type="primary" onClick={onCreate}>Add Server</Button>
+            </Space>
+          )}
         >
           <Table
             rowKey="id"
@@ -178,6 +204,7 @@ export default function ServersPage() {
                     <Popconfirm title={`Restart ${row.name}?`} onConfirm={() => runAction(row, 'restart')}>
                       <Button size="small">Restart</Button>
                     </Popconfirm>
+                    <Button size="small" onClick={() => openPreview(row, 'restart')}>Preview Cmd</Button>
                     <Button size="small" onClick={() => onEdit(row)}>Edit</Button>
                     <Popconfirm title={`Delete ${row.name}?`} onConfirm={() => onDelete(row)}>
                       <Button size="small" danger type="dashed">Delete</Button>
@@ -206,6 +233,21 @@ export default function ServersPage() {
           <Typography.Text type="secondary">Initial version: command records only. Next we can add operator + result details.</Typography.Text>
         </Card>
       </Col>
+
+      <Modal
+        title="Execution Preview"
+        open={previewOpen}
+        onCancel={() => setPreviewOpen(false)}
+        footer={<Button onClick={() => setPreviewOpen(false)}>Close</Button>}
+      >
+        {preview && (
+          <Descriptions column={1} size="small" bordered>
+            <Descriptions.Item label="Vendor">{preview.vendor}</Descriptions.Item>
+            <Descriptions.Item label="Action">{preview.action}</Descriptions.Item>
+            <Descriptions.Item label="Command"><code>{preview.command}</code></Descriptions.Item>
+          </Descriptions>
+        )}
+      </Modal>
 
       <Modal
         title={editing ? 'Edit Server' : 'Add Server'}

@@ -21,6 +21,7 @@ class DashboardSummary(BaseModel):
 
 class ServerActionRequest(BaseModel):
     action: str
+    dry_run: bool = True
 
 
 class ServerUpsertRequest(BaseModel):
