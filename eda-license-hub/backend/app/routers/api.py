@@ -62,6 +62,31 @@ def build_risk_summary() -> RiskSummary:
     return RiskSummary(critical=critical, high=high, medium=medium, findings=findings)
 
 
+def derive_synopsys_used_from_log() -> dict[str, int]:
+    """Compute current in-use count per feature from OUT/IN events in synopsys.log."""
+    p = Path.home() / "Desktop" / "日志" / "synopsys.log"
+    if not p.exists():
+        return {}
+
+    used: dict[str, int] = {}
+    out_re = re.compile(r'OUT:\s+"([^"]+)"', re.IGNORECASE)
+    in_re = re.compile(r'IN:\s+"([^"]+)"', re.IGNORECASE)
+
+    for line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+        m_out = out_re.search(line)
+        if m_out:
+            f = m_out.group(1).strip()
+            used[f] = used.get(f, 0) + 1
+            continue
+
+        m_in = in_re.search(line)
+        if m_in:
+            f = m_in.group(1).strip()
+            used[f] = max(used.get(f, 0) - 1, 0)
+
+    return used
+
+
 @router.get("/health")
 def health():
     return {"status": "ok"}
@@ -343,6 +368,7 @@ async def upload_license(file: UploadFile = File(...), db: Session = Depends(get
     created = 0
     in_regex = re.compile(r"^INCREMENT\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)", re.IGNORECASE)
     feat_regex = re.compile(r"^FEATURE\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)", re.IGNORECASE)
+    synopsys_used_map = derive_synopsys_used_from_log() if vendor_name == "synopsys" else {}
 
     for line in lines:
         m = in_regex.match(line) or feat_regex.match(line)
@@ -366,7 +392,11 @@ async def upload_license(file: UploadFile = File(...), db: Session = Depends(get
             total_i = int(total)
         except Exception:
             total_i = 1
-        used = min(max(total_i // 2, 0), total_i)
+
+        if vendor_name == "synopsys":
+            used = min(max(synopsys_used_map.get(feat_name, 0), 0), total_i)
+        else:
+            used = min(max(total_i // 2, 0), total_i)
 
         db.add(
             FeatureSnapshot(
@@ -410,8 +440,15 @@ async def upload_license(file: UploadFile = File(...), db: Session = Depends(get
 
 
 @router.get("/license-keys")
-def license_keys(db: Session = Depends(get_db)):
-    records = db.query(LicenseKeyRecord).order_by(desc(LicenseKeyRecord.collected_at)).limit(500).all()
+def license_keys(vendor: str = "all", keyword: str = "", limit: int = 500, db: Session = Depends(get_db)):
+    q = db.query(LicenseKeyRecord)
+    if vendor != "all":
+        q = q.filter(func.lower(LicenseKeyRecord.vendor) == vendor.lower())
+    if keyword.strip():
+        kw = f"%{keyword.strip()}%"
+        q = q.filter(LicenseKeyRecord.feature.ilike(kw))
+
+    records = q.order_by(desc(LicenseKeyRecord.collected_at)).limit(max(1, min(limit, 5000))).all()
     if records:
         return [
             {
