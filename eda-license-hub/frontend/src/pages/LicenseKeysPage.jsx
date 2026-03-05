@@ -1,4 +1,4 @@
-import { Button, Card, Input, Progress, Space, Table, Tag } from 'antd'
+import { Button, Card, Input, Progress, Select, Space, Table, Tag } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import api, { useMock } from '../api'
 import { mockLicenseKeys } from '../mockData'
@@ -7,6 +7,7 @@ export default function LicenseKeysPage() {
   const [rows, setRows] = useState([])
   const [keyword, setKeyword] = useState('')
   const [searchText, setSearchText] = useState('')
+  const [vendorFilter, setVendorFilter] = useState('all')
 
   const load = async () => {
     try {
@@ -29,15 +30,29 @@ export default function LicenseKeysPage() {
 
   const filtered = useMemo(() => {
     const k = searchText.trim().toLowerCase()
-    if (!k) return rows
-    return rows.filter((r) =>
+    let base = rows
+    if (vendorFilter !== 'all') {
+      base = base.filter((r) => String(r.vendor).toLowerCase() === vendorFilter)
+    }
+    if (!k) return base
+    return base.filter((r) =>
       [r.feature, r.vendor, r.version, r.server].join(' ').toLowerCase().includes(k),
     )
-  }, [rows, searchText])
+  }, [rows, searchText, vendorFilter])
 
   return (
     <Card title="License Keys">
-      <Space style={{ marginBottom: 12 }}>
+      <Space style={{ marginBottom: 12 }} wrap>
+        <Select
+          value={vendorFilter}
+          onChange={setVendorFilter}
+          style={{ width: 200 }}
+          options={[
+            { label: 'All Vendors', value: 'all' },
+            { label: 'Synopsys', value: 'synopsys' },
+            { label: 'Cadence', value: 'cadence' },
+          ]}
+        />
         <Input
           placeholder="Search feature/vendor/version/server"
           value={keyword}

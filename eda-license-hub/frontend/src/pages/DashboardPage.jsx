@@ -1,4 +1,4 @@
-import { Card, Col, Progress, Row, Space, Statistic, Table, Tag, Typography } from 'antd'
+import { Card, Col, Progress, Row, Select, Space, Statistic, Table, Tag, Typography } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import api, { useMock } from '../api'
 import { mockDashboard } from '../mockData'
@@ -32,6 +32,7 @@ function ScoreCard({ title, value, color = '#1677ff', suffix, hint }) {
 
 export default function DashboardPage() {
   const [data, setData] = useState(null)
+  const [vendorFilter, setVendorFilter] = useState('all')
 
   useEffect(() => {
     if (useMock) {
@@ -40,6 +41,12 @@ export default function DashboardPage() {
     }
     api.get('/dashboard').then((r) => setData(r.data))
   }, [])
+
+  const filteredTopFeatures = useMemo(() => {
+    const list = data?.top_busy_features || []
+    if (vendorFilter === 'all') return list
+    return list.filter((x) => String(x.vendor).toLowerCase() === vendorFilter)
+  }, [data, vendorFilter])
 
   const riskCounts = useMemo(() => {
     const list = data?.risk_summary?.findings || []
@@ -84,10 +91,25 @@ export default function DashboardPage() {
 
       <Row gutter={14}>
         <Col span={16}>
-          <Card title="Top Busy Features" style={glass}>
+          <Card
+            title="Top Busy Features"
+            style={glass}
+            extra={
+              <Select
+                value={vendorFilter}
+                onChange={setVendorFilter}
+                style={{ width: 180 }}
+                options={[
+                  { label: 'All Vendors', value: 'all' },
+                  { label: 'Synopsys', value: 'synopsys' },
+                  { label: 'Cadence', value: 'cadence' },
+                ]}
+              />
+            }
+          >
             <Table
               rowKey={(r) => `${r.feature}-${r.server}-${r.collected_at}`}
-              dataSource={data?.top_busy_features || []}
+              dataSource={filteredTopFeatures}
               pagination={false}
               columns={[
                 { title: 'Feature', dataIndex: 'feature' },
