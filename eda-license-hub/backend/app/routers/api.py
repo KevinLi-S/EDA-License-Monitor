@@ -1,6 +1,8 @@
 from datetime import datetime
 from pathlib import Path
+import os
 import re
+import subprocess
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import desc, func
@@ -26,6 +28,13 @@ def build_vendor_command(vendor: str, host: str, port: int, action: str) -> str:
     return f"licensectl --vendor {vendor} {action} --server {host}:{port}"
 
 
+def log_base_dir() -> Path:
+    p = os.getenv("LOG_BASE_DIR", "").strip()
+    if p:
+        return Path(p)
+    return Path.home() / "Desktop" / "日志"
+
+
 def parse_log_findings(vendor: str, path: Path) -> list[RiskFinding]:
     if not path.exists():
         return []
@@ -49,7 +58,7 @@ def parse_log_findings(vendor: str, path: Path) -> list[RiskFinding]:
 
 
 def build_risk_summary() -> RiskSummary:
-    base = Path.home() / "Desktop" / "日志"
+    base = log_base_dir()
     findings = [
         *parse_log_findings("synopsys", base / "synopsys.log"),
         *parse_log_findings("ansys", base / "ansys.log"),
@@ -64,7 +73,7 @@ def build_risk_summary() -> RiskSummary:
 
 def derive_synopsys_used_from_log() -> dict[str, int]:
     """Compute current in-use count per feature from OUT/IN events in synopsys.log."""
-    p = Path.home() / "Desktop" / "日志" / "synopsys.log"
+    p = log_base_dir() / "synopsys.log"
     if not p.exists():
         return {}
 
@@ -141,9 +150,12 @@ def dashboard(db: Session = Depends(get_db)):
             for r in top_rows
         ]
 
+    real_vendor_count = db.query(func.count(func.distinct(LicenseKeyRecord.vendor))).scalar() or 0
+    real_server_count = db.query(func.count(func.distinct(LicenseKeyRecord.server))).scalar() or 0
+
     return DashboardSummary(
-        vendor_count=db.query(func.count(Vendor.id)).scalar() or 0,
-        server_count=db.query(func.count(LicenseServer.id)).scalar() or 0,
+        vendor_count=real_vendor_count or (db.query(func.count(Vendor.id)).scalar() or 0),
+        server_count=real_server_count or (db.query(func.count(LicenseServer.id)).scalar() or 0),
         open_alerts=db.query(func.count(Alert.id)).filter(Alert.status == "open").scalar() or 0,
         top_busy_features=top_busy,
         risk_summary=build_risk_summary(),
@@ -152,7 +164,13 @@ def dashboard(db: Session = Depends(get_db)):
 
 @router.get("/servers")
 def servers(db: Session = Depends(get_db)):
-    rows = db.query(LicenseServer, Vendor.name).join(Vendor, Vendor.id == LicenseServer.vendor_id).all()
+    real_server_names = {x[0] for x in db.query(LicenseKeyRecord.server).distinct().all() if x and x[0]}
+
+    q = db.query(LicenseServer, Vendor.name).join(Vendor, Vendor.id == LicenseServer.vendor_id)
+    if real_server_names:
+        q = q.filter(LicenseServer.name.in_(real_server_names))
+
+    rows = q.all()
     return [
         {
             "id": s.id,
@@ -268,24 +286,48 @@ def server_action(server_id: int, req: ServerActionRequest, db: Session = Depend
             "message": "Dry run only. No real execution.",
         }
 
-    if action == "start":
-        server.status = "online"
-        msg = "service started"
-    elif action == "stop":
-        server.status = "offline"
-        msg = "service stopped"
-    else:
-        server.status = "restarting"
-        msg = "service restarting"
+    # Real execution mode: run command and only update status if command succeeds.
+    try:
+        res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=20)
+        ok = res.returncode == 0
+        stdout = (res.stdout or "").strip()
+        stderr = (res.stderr or "").strip()
+    except Exception as e:
+        ok = False
+        stdout = ""
+        stderr = str(e)
 
-    server.last_seen_at = datetime.utcnow()
-    db.add(server)
-    db.flush()
+    if ok:
+        if action == "start":
+            server.status = "online"
+        elif action == "stop":
+            server.status = "offline"
+        else:
+            server.status = "restarting"
+        server.last_seen_at = datetime.utcnow()
+        db.add(server)
+        db.flush()
 
-    db.add(ServerActionLog(server_id=server.id, action=action, status_after=server.status, message=f"{msg}; cmd={cmd}"))
+    db.add(
+        ServerActionLog(
+            server_id=server.id,
+            action=action,
+            status_after=server.status,
+            message=f"cmd={cmd}; rc={(0 if ok else 1)}; out={stdout[:120]}; err={stderr[:180]}",
+        )
+    )
     db.commit()
 
-    return {"ok": True, "dry_run": False, "server_id": server_id, "action": action, "status": server.status, "command": cmd}
+    return {
+        "ok": ok,
+        "dry_run": False,
+        "server_id": server_id,
+        "action": action,
+        "status": server.status,
+        "command": cmd,
+        "stdout": stdout,
+        "stderr": stderr,
+    }
 
 
 @router.get("/server-actions")
@@ -506,8 +548,8 @@ def license_keys(vendor: str = "all", keyword: str = "", limit: int = 500, db: S
 
 
 @router.get("/license-logs")
-def license_logs(vendor: str = "all", keyword: str = ""):
-    base = Path.home() / "Desktop" / "日志"
+def license_logs(vendor: str = "all", keyword: str = "", mode: str = "full", limit: int = 5000):
+    base = log_base_dir()
     files = []
     if vendor in {"all", "synopsys"}:
         files.append(("synopsys", base / "synopsys.log"))
@@ -516,6 +558,8 @@ def license_logs(vendor: str = "all", keyword: str = ""):
 
     patterns = ["error", "denied", "failed", "tampered", "unsupported", "cannot", "refused", "expired"]
     keyword = (keyword or "").strip().lower()
+    mode = (mode or "full").lower()
+    limit = max(1, min(limit, 20000))
 
     out = []
     for v, p in files:
@@ -525,12 +569,13 @@ def license_logs(vendor: str = "all", keyword: str = ""):
         for i, line in enumerate(lines, start=1):
             low = line.lower()
             match_error = any(k in low for k in patterns)
-            match_keyword = (not keyword) or (keyword in low)
-            if match_error and match_keyword:
-                out.append({"id": f"{v}-{i}", "vendor": v, "line": i, "content": line.strip()[:500]})
+            if mode == "error" and not match_error:
+                continue
+            if keyword and keyword not in low:
+                continue
+            out.append({"id": f"{v}-{i}", "vendor": v, "line": i, "content": line.rstrip()})
 
-    return out[-500:][::-1]
-
+    return out[-limit:]
 
 @router.get("/alerts")
 def alerts(db: Session = Depends(get_db)):

@@ -102,7 +102,8 @@ export default function ServersPage() {
     }
     const res = await api.post(`/servers/${row.id}/action`, { action, dry_run: dryRun })
     if (res.data?.dry_run) message.info(`Dry run: ${action} previewed, no execution`)
-    else message.success(`${action} command sent`)
+    else if (res.data?.ok) message.success(`${action} command executed`)
+    else message.error(`Real execution failed: ${res.data?.stderr || 'command not available in runtime'}`)
     load()
   }
 

@@ -6,6 +6,10 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    environment:
+      - LOG_BASE_DIR=/data/logs
+    volumes:
+      - "C:/Users/李文瑞/Desktop/日志:/data/logs:ro"
 
   frontend:
     build:
