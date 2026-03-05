@@ -1,7 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
@@ -290,6 +290,83 @@ def features(db: Session = Depends(get_db)):
         }
         for snap, f_name, s_name, v_name in rows
     ]
+
+
+@router.post("/license/upload")
+async def upload_license(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    content = (await file.read()).decode("utf-8", errors="ignore")
+    lines = [x.strip() for x in content.splitlines() if x.strip()]
+
+    # very light parser for demo: FEATURE <name> <vendor> <ver> <exp> <count>
+    created = 0
+    vendor_cache: dict[str, int] = {}
+    server = db.query(LicenseServer).first()
+    if not server:
+        v = db.query(Vendor).filter(Vendor.name == "synopsys").first()
+        if not v:
+            v = Vendor(name="synopsys")
+            db.add(v)
+            db.flush()
+        server = LicenseServer(vendor_id=v.id, name="uploaded-lic-01", host="127.0.0.1", port=27000, status="online", last_seen_at=datetime.utcnow())
+        db.add(server)
+        db.flush()
+
+    for line in lines:
+        if not line.upper().startswith("FEATURE "):
+            continue
+        parts = line.split()
+        if len(parts) < 6:
+            continue
+
+        _, feat_name, vendor_name, version, expiry, total = parts[:6]
+        vendor_name = vendor_name.lower()
+        if vendor_name in vendor_cache:
+            vendor_id = vendor_cache[vendor_name]
+        else:
+            vendor = db.query(Vendor).filter(func.lower(Vendor.name) == vendor_name).first()
+            if not vendor:
+                vendor = Vendor(name=vendor_name)
+                db.add(vendor)
+                db.flush()
+            vendor_id = vendor.id
+            vendor_cache[vendor_name] = vendor_id
+
+        feature = db.query(Feature).filter(Feature.vendor_id == vendor_id, Feature.name == feat_name).first()
+        if not feature:
+            feature = Feature(vendor_id=vendor_id, name=feat_name)
+            db.add(feature)
+            db.flush()
+
+        try:
+            total_i = int(total)
+        except Exception:
+            total_i = 1
+
+        used = min(max(total_i // 2, 0), total_i)
+        db.add(
+            FeatureSnapshot(
+                server_id=server.id,
+                feature_id=feature.id,
+                total=total_i,
+                used=used,
+                free=total_i - used,
+                collected_at=datetime.utcnow(),
+            )
+        )
+        db.add(
+            Alert(
+                type="license_upload",
+                severity="medium",
+                server_id=server.id,
+                feature_id=feature.id,
+                message=f"Uploaded {feat_name} v{version} exp={expiry}",
+                status="open",
+            )
+        )
+        created += 1
+
+    db.commit()
+    return {"ok": True, "parsed_features": created, "filename": file.filename}
 
 
 @router.get("/license-keys")

@@ -9,12 +9,18 @@ export default function LicenseKeysPage() {
   const [searchText, setSearchText] = useState('')
 
   const load = async () => {
-    if (useMock) {
-      setRows(mockLicenseKeys)
-      return
+    try {
+      if (useMock) {
+        setRows(mockLicenseKeys)
+        return
+      }
+      const r = await api.get('/license-keys')
+      setRows(Array.isArray(r.data) ? r.data : [])
+    } catch (e) {
+      console.error(e)
+      setRows([])
+      window?.alert?.('License Keys loading failed. Please refresh backend and try again.')
     }
-    const r = await api.get('/license-keys')
-    setRows(r.data)
   }
 
   useEffect(() => {

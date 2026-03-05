@@ -14,8 +14,10 @@ import {
   Table,
   Tag,
   Typography,
+  Upload,
   message,
 } from 'antd'
+import { UploadOutlined } from '@ant-design/icons'
 import { useEffect, useMemo, useState } from 'react'
 import api, { useMock } from '../api'
 import { mockServerActions, mockServers } from '../mockData'
@@ -34,6 +36,9 @@ export default function ServersPage() {
   const [dryRun, setDryRun] = useState(true)
   const [preview, setPreview] = useState(null)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [uploadFileList, setUploadFileList] = useState([])
+  const [uploading, setUploading] = useState(false)
   const [form] = Form.useForm()
 
   const vendorOptions = useMemo(() => ['synopsys', 'cadence', 'mentor', 'ansys'], [])
@@ -96,11 +101,8 @@ export default function ServersPage() {
       return
     }
     const res = await api.post(`/servers/${row.id}/action`, { action, dry_run: dryRun })
-    if (res.data?.dry_run) {
-      message.info(`Dry run: ${action} previewed, no execution`)
-    } else {
-      message.success(`${action} command sent`)
-    }
+    if (res.data?.dry_run) message.info(`Dry run: ${action} previewed, no execution`)
+    else message.success(`${action} command sent`)
     load()
   }
 
@@ -113,12 +115,7 @@ export default function ServersPage() {
 
   const onEdit = (row) => {
     setEditing(row)
-    form.setFieldsValue({
-      name: row.name,
-      vendor: row.vendor,
-      host: row.host,
-      port: row.port,
-    })
+    form.setFieldsValue({ name: row.name, vendor: row.vendor, host: row.host, port: row.port })
     setOpen(true)
   }
 
@@ -136,18 +133,9 @@ export default function ServersPage() {
   const onSubmit = async () => {
     const values = await form.validateFields()
     if (useMock) {
-      if (editing) {
-        setRows((prev) => prev.map((x) => (x.id === editing.id ? { ...x, ...values } : x)))
-      } else {
-        setRows((prev) => [
-          {
-            id: Date.now(),
-            ...values,
-            status: 'offline',
-            last_seen_at: new Date().toISOString(),
-          },
-          ...prev,
-        ])
+      if (editing) setRows((prev) => prev.map((x) => (x.id === editing.id ? { ...x, ...values } : x)))
+      else {
+        setRows((prev) => [{ id: Date.now(), ...values, status: 'offline', last_seen_at: new Date().toISOString() }, ...prev])
       }
       setOpen(false)
       message.success('Mock save complete')
@@ -165,6 +153,34 @@ export default function ServersPage() {
     load()
   }
 
+  const doUploadLicense = async () => {
+    const f = uploadFileList[0]?.originFileObj
+    if (!f) {
+      message.warning('Please select a license file first')
+      return
+    }
+
+    if (useMock) {
+      message.success('Mock upload done. Go to License Keys page to view updates.')
+      setUploadOpen(false)
+      setUploadFileList([])
+      return
+    }
+
+    const fd = new FormData()
+    fd.append('file', f)
+    setUploading(true)
+    try {
+      const r = await api.post('/license/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      message.success(`Upload success: parsed ${r.data?.parsed_features ?? 0} features`)
+      setUploadOpen(false)
+      setUploadFileList([])
+      load()
+    } finally {
+      setUploading(false)
+    }
+  }
+
   return (
     <Row gutter={16}>
       <Col span={16}>
@@ -174,6 +190,7 @@ export default function ServersPage() {
             <Space>
               <span>Dry Run</span>
               <Switch checked={dryRun} onChange={setDryRun} />
+              <Button onClick={() => setUploadOpen(true)} icon={<UploadOutlined />}>Upload License</Button>
               <Button type="primary" onClick={onCreate}>Add Server</Button>
             </Space>
           )}
@@ -186,29 +203,17 @@ export default function ServersPage() {
               { title: 'Vendor', dataIndex: 'vendor' },
               { title: 'Host', dataIndex: 'host' },
               { title: 'Port', dataIndex: 'port' },
-              {
-                title: 'Status',
-                dataIndex: 'status',
-                render: (v) => <Tag color={statusColor(v)}>{v}</Tag>,
-              },
+              { title: 'Status', dataIndex: 'status', render: (v) => <Tag color={statusColor(v)}>{v}</Tag> },
               {
                 title: 'Actions',
                 render: (_, row) => (
                   <Space wrap>
-                    <Popconfirm title={`Start ${row.name}?`} onConfirm={() => runAction(row, 'start')}>
-                      <Button size="small" type="primary">Start</Button>
-                    </Popconfirm>
-                    <Popconfirm title={`Stop ${row.name}?`} onConfirm={() => runAction(row, 'stop')}>
-                      <Button size="small" danger>Stop</Button>
-                    </Popconfirm>
-                    <Popconfirm title={`Restart ${row.name}?`} onConfirm={() => runAction(row, 'restart')}>
-                      <Button size="small">Restart</Button>
-                    </Popconfirm>
+                    <Popconfirm title={`Start ${row.name}?`} onConfirm={() => runAction(row, 'start')}><Button size="small" type="primary">Start</Button></Popconfirm>
+                    <Popconfirm title={`Stop ${row.name}?`} onConfirm={() => runAction(row, 'stop')}><Button size="small" danger>Stop</Button></Popconfirm>
+                    <Popconfirm title={`Restart ${row.name}?`} onConfirm={() => runAction(row, 'restart')}><Button size="small">Restart</Button></Popconfirm>
                     <Button size="small" onClick={() => openPreview(row, 'restart')}>Preview Cmd</Button>
                     <Button size="small" onClick={() => onEdit(row)}>Edit</Button>
-                    <Popconfirm title={`Delete ${row.name}?`} onConfirm={() => onDelete(row)}>
-                      <Button size="small" danger type="dashed">Delete</Button>
-                    </Popconfirm>
+                    <Popconfirm title={`Delete ${row.name}?`} onConfirm={() => onDelete(row)}><Button size="small" danger type="dashed">Delete</Button></Popconfirm>
                   </Space>
                 ),
               },
@@ -230,16 +235,11 @@ export default function ServersPage() {
               { title: 'Time', dataIndex: 'created_at' },
             ]}
           />
-          <Typography.Text type="secondary">Initial version: command records only. Next we can add operator + result details.</Typography.Text>
+          <Typography.Text type="secondary">Now supports license file upload for real-time key refresh.</Typography.Text>
         </Card>
       </Col>
 
-      <Modal
-        title="Execution Preview"
-        open={previewOpen}
-        onCancel={() => setPreviewOpen(false)}
-        footer={<Button onClick={() => setPreviewOpen(false)}>Close</Button>}
-      >
+      <Modal title="Execution Preview" open={previewOpen} onCancel={() => setPreviewOpen(false)} footer={<Button onClick={() => setPreviewOpen(false)}>Close</Button>}>
         {preview && (
           <Descriptions column={1} size="small" bordered>
             <Descriptions.Item label="Vendor">{preview.vendor}</Descriptions.Item>
@@ -249,26 +249,23 @@ export default function ServersPage() {
         )}
       </Modal>
 
-      <Modal
-        title={editing ? 'Edit Server' : 'Add Server'}
-        open={open}
-        onCancel={() => setOpen(false)}
-        onOk={onSubmit}
-        okText="Save"
-      >
+      <Modal title="Upload License File" open={uploadOpen} onCancel={() => setUploadOpen(false)} onOk={doUploadLicense} confirmLoading={uploading} okText="Upload & Refresh">
+        <Upload
+          beforeUpload={() => false}
+          fileList={uploadFileList}
+          onChange={({ fileList }) => setUploadFileList(fileList.slice(-1))}
+          maxCount={1}
+        >
+          <Button icon={<UploadOutlined />}>Select license file (.lic / .dat / .txt)</Button>
+        </Upload>
+      </Modal>
+
+      <Modal title={editing ? 'Edit Server' : 'Add Server'} open={open} onCancel={() => setOpen(false)} onOk={onSubmit} okText="Save">
         <Form form={form} layout="vertical">
-          <Form.Item name="name" label="Name" rules={[{ required: true }]}>
-            <Input placeholder="snps-lic-01" />
-          </Form.Item>
-          <Form.Item name="vendor" label="Vendor" rules={[{ required: true }]}>
-            <Input placeholder={`e.g. ${vendorOptions.join('/')}`} />
-          </Form.Item>
-          <Form.Item name="host" label="Host" rules={[{ required: true }]}>
-            <Input placeholder="10.0.0.11" />
-          </Form.Item>
-          <Form.Item name="port" label="Port" rules={[{ required: true }]}>
-            <InputNumber min={1} max={65535} style={{ width: '100%' }} />
-          </Form.Item>
+          <Form.Item name="name" label="Name" rules={[{ required: true }]}><Input placeholder="snps-lic-01" /></Form.Item>
+          <Form.Item name="vendor" label="Vendor" rules={[{ required: true }]}><Input placeholder={`e.g. ${vendorOptions.join('/')}`} /></Form.Item>
+          <Form.Item name="host" label="Host" rules={[{ required: true }]}><Input placeholder="10.0.0.11" /></Form.Item>
+          <Form.Item name="port" label="Port" rules={[{ required: true }]}><InputNumber min={1} max={65535} style={{ width: '100%' }} /></Form.Item>
         </Form>
       </Modal>
     </Row>
