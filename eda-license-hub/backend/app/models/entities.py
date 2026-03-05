@@ -66,3 +66,18 @@ class ServerActionLog(Base):
     status_after: Mapped[str] = mapped_column(String(32))
     message: Mapped[str] = mapped_column(String(256), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class LicenseKeyRecord(Base):
+    __tablename__ = "license_key_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    vendor: Mapped[str] = mapped_column(String(64), index=True)
+    feature: Mapped[str] = mapped_column(String(128), index=True)
+    version: Mapped[str] = mapped_column(String(64), default="N/A")
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    used: Mapped[int] = mapped_column(Integer, default=0)
+    expiry: Mapped[str] = mapped_column(String(32), default="N/A")
+    server: Mapped[str] = mapped_column(String(128), default="unknown")
+    source_file: Mapped[str] = mapped_column(String(256), default="")
+    collected_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

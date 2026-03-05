@@ -1,12 +1,13 @@
 from datetime import datetime
 from pathlib import Path
+import re
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models.entities import Alert, Feature, FeatureSnapshot, LicenseServer, ServerActionLog, Vendor
+from app.models.entities import Alert, Feature, FeatureSnapshot, LicenseKeyRecord, LicenseServer, ServerActionLog, Vendor
 from app.schemas import DashboardSummary, FeaturePoint, RiskSummary, RiskFinding, ServerActionRequest, ServerUpsertRequest
 
 router = APIRouter(prefix="/api", tags=["api"])
@@ -297,43 +298,67 @@ async def upload_license(file: UploadFile = File(...), db: Session = Depends(get
     content = (await file.read()).decode("utf-8", errors="ignore")
     lines = [x.strip() for x in content.splitlines() if x.strip()]
 
-    # very light parser for demo: FEATURE <name> <vendor> <ver> <exp> <count>
-    created = 0
-    vendor_cache: dict[str, int] = {}
-    server = db.query(LicenseServer).first()
+    server_line = next((x for x in lines if x.upper().startswith("SERVER ")), "")
+    daemon_line = next((x for x in lines if x.upper().startswith("DAEMON ")), "")
+
+    server_name = "uploaded-lic-01"
+    server_port = 27000
+    if server_line:
+        p = server_line.split()
+        if len(p) >= 4:
+            server_name = p[1]
+            try:
+                server_port = int(p[3])
+            except Exception:
+                pass
+
+    vendor_name = "synopsys"
+    if daemon_line:
+        p = daemon_line.split()
+        if len(p) >= 2 and "snpslmd" in p[1].lower():
+            vendor_name = "synopsys"
+
+    vendor = db.query(Vendor).filter(func.lower(Vendor.name) == vendor_name).first()
+    if not vendor:
+        vendor = Vendor(name=vendor_name)
+        db.add(vendor)
+        db.flush()
+
+    server = db.query(LicenseServer).filter(LicenseServer.name == server_name).first()
     if not server:
-        v = db.query(Vendor).filter(Vendor.name == "synopsys").first()
-        if not v:
-            v = Vendor(name="synopsys")
-            db.add(v)
-            db.flush()
-        server = LicenseServer(vendor_id=v.id, name="uploaded-lic-01", host="127.0.0.1", port=27000, status="online", last_seen_at=datetime.utcnow())
+        server = LicenseServer(
+            vendor_id=vendor.id,
+            name=server_name,
+            host=server_name,
+            port=server_port,
+            status="online",
+            last_seen_at=datetime.utcnow(),
+        )
         db.add(server)
         db.flush()
 
+    # replace previous records from same source file
+    db.query(LicenseKeyRecord).filter(LicenseKeyRecord.source_file == (file.filename or "")).delete()
+
+    created = 0
+    in_regex = re.compile(r"^INCREMENT\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)", re.IGNORECASE)
+    feat_regex = re.compile(r"^FEATURE\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)", re.IGNORECASE)
+
     for line in lines:
-        if not line.upper().startswith("FEATURE "):
-            continue
-        parts = line.split()
-        if len(parts) < 6:
+        m = in_regex.match(line) or feat_regex.match(line)
+        if not m:
             continue
 
-        _, feat_name, vendor_name, version, expiry, total = parts[:6]
-        vendor_name = vendor_name.lower()
-        if vendor_name in vendor_cache:
-            vendor_id = vendor_cache[vendor_name]
-        else:
-            vendor = db.query(Vendor).filter(func.lower(Vendor.name) == vendor_name).first()
-            if not vendor:
-                vendor = Vendor(name=vendor_name)
-                db.add(vendor)
-                db.flush()
-            vendor_id = vendor.id
-            vendor_cache[vendor_name] = vendor_id
+        feat_name, daemon, version, expiry, total = m.groups()
+        vendor_row = db.query(Vendor).filter(func.lower(Vendor.name) == vendor_name).first()
+        if not vendor_row:
+            vendor_row = Vendor(name=vendor_name)
+            db.add(vendor_row)
+            db.flush()
 
-        feature = db.query(Feature).filter(Feature.vendor_id == vendor_id, Feature.name == feat_name).first()
+        feature = db.query(Feature).filter(Feature.vendor_id == vendor_row.id, Feature.name == feat_name).first()
         if not feature:
-            feature = Feature(vendor_id=vendor_id, name=feat_name)
+            feature = Feature(vendor_id=vendor_row.id, name=feat_name)
             db.add(feature)
             db.flush()
 
@@ -341,8 +366,8 @@ async def upload_license(file: UploadFile = File(...), db: Session = Depends(get
             total_i = int(total)
         except Exception:
             total_i = 1
-
         used = min(max(total_i // 2, 0), total_i)
+
         db.add(
             FeatureSnapshot(
                 server_id=server.id,
@@ -353,24 +378,55 @@ async def upload_license(file: UploadFile = File(...), db: Session = Depends(get
                 collected_at=datetime.utcnow(),
             )
         )
+
         db.add(
-            Alert(
-                type="license_upload",
-                severity="medium",
-                server_id=server.id,
-                feature_id=feature.id,
-                message=f"Uploaded {feat_name} v{version} exp={expiry}",
-                status="open",
+            LicenseKeyRecord(
+                vendor=vendor_name,
+                feature=feat_name,
+                version=version,
+                total=total_i,
+                used=used,
+                expiry=expiry,
+                server=server_name,
+                source_file=file.filename or "",
+                collected_at=datetime.utcnow(),
             )
         )
         created += 1
 
+    db.add(
+        Alert(
+            type="license_upload",
+            severity="medium",
+            server_id=server.id,
+            feature_id=None,
+            message=f"Uploaded {file.filename}, parsed {created} features",
+            status="open",
+        )
+    )
+
     db.commit()
-    return {"ok": True, "parsed_features": created, "filename": file.filename}
+    return {"ok": True, "parsed_features": created, "filename": file.filename, "server": server_name, "port": server_port}
 
 
 @router.get("/license-keys")
 def license_keys(db: Session = Depends(get_db)):
+    records = db.query(LicenseKeyRecord).order_by(desc(LicenseKeyRecord.collected_at)).limit(500).all()
+    if records:
+        return [
+            {
+                "id": r.id,
+                "feature": r.feature,
+                "vendor": r.vendor,
+                "version": r.version,
+                "total": r.total,
+                "used": r.used,
+                "expiry": r.expiry,
+                "server": r.server,
+            }
+            for r in records
+        ]
+
     rows = (
         db.query(FeatureSnapshot, Feature.name, LicenseServer.name, Vendor.name)
         .join(Feature, Feature.id == FeatureSnapshot.feature_id)
@@ -381,35 +437,19 @@ def license_keys(db: Session = Depends(get_db)):
         .all()
     )
 
-    vendor_versions = {
-        "synopsys": "2023.09",
-        "cadence": "ICADVM20.1",
-        "mentor": "2022.4",
-        "ansys": "2024R1",
-    }
-    vendor_expiry = {
-        "synopsys": "2026-12-31",
-        "cadence": "2027-01-30",
-        "mentor": "2026-11-15",
-        "ansys": "2026-08-15",
-    }
-
-    out = []
-    for idx, (snap, f_name, s_name, v_name) in enumerate(rows, start=1):
-        v = (v_name or "").lower()
-        out.append(
-            {
-                "id": idx,
-                "feature": f_name,
-                "vendor": v,
-                "version": vendor_versions.get(v, "N/A"),
-                "total": snap.total,
-                "used": snap.used,
-                "expiry": vendor_expiry.get(v, "N/A"),
-                "server": s_name,
-            }
-        )
-    return out
+    return [
+        {
+            "id": idx,
+            "feature": f_name,
+            "vendor": (v_name or "").lower(),
+            "version": "N/A",
+            "total": snap.total,
+            "used": snap.used,
+            "expiry": "N/A",
+            "server": s_name,
+        }
+        for idx, (snap, f_name, s_name, v_name) in enumerate(rows, start=1)
+    ]
 
 
 @router.get("/license-logs")
