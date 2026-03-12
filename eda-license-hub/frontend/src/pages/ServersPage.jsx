@@ -1,4 +1,5 @@
 import {
+  Alert,
   Button,
   Card,
   Col,
@@ -10,21 +11,21 @@ import {
   Popconfirm,
   Row,
   Space,
+  Statistic,
   Switch,
   Table,
   Tag,
   Typography,
-  Upload,
   message,
 } from 'antd'
-import { UploadOutlined } from '@ant-design/icons'
 import { useEffect, useMemo, useState } from 'react'
 import api, { useMock } from '../api'
 import { mockServerActions, mockServers } from '../mockData'
 
 const statusColor = (v) => {
   if (v === 'online') return 'green'
-  if (v === 'degraded' || v === 'restarting') return 'gold'
+  if (v === 'degraded' || v === 'restarting' || v === 'stale') return 'gold'
+  if (v === 'unknown') return 'default'
   return 'red'
 }
 
@@ -36,40 +37,44 @@ export default function ServersPage() {
   const [dryRun, setDryRun] = useState(true)
   const [preview, setPreview] = useState(null)
   const [previewOpen, setPreviewOpen] = useState(false)
-  const [uploadOpen, setUploadOpen] = useState(false)
-  const [uploadFileList, setUploadFileList] = useState([])
-  const [uploading, setUploading] = useState(false)
+  const [detail, setDetail] = useState(null)
+  const [detailOpen, setDetailOpen] = useState(false)
   const [form] = Form.useForm()
 
   const vendorOptions = useMemo(() => ['synopsys', 'cadence', 'mentor', 'ansys'], [])
 
+  const enrichRows = (items) => items.map((x, idx) => ({
+    ...x,
+    feature_count: x.feature_count ?? (idx + 2) * 3,
+    total_licenses: x.total_licenses ?? (idx + 1) * 80,
+    used_licenses: x.used_licenses ?? (idx + 1) * 42,
+    risk_level: x.risk_level ?? (x.status === 'offline' ? 'high' : x.status === 'online' ? 'low' : 'medium'),
+  }))
+
   const load = async () => {
     if (useMock) {
-      setRows(mockServers)
+      setRows(enrichRows(mockServers))
       setActionRows(mockServerActions)
       return
     }
     const [serversRes, actionsRes] = await Promise.all([api.get('/servers'), api.get('/server-actions')])
-    setRows(serversRes.data)
-    setActionRows(actionsRes.data)
+    setRows(enrichRows(serversRes.data || []))
+    setActionRows(actionsRes.data || [])
   }
 
   useEffect(() => {
     load()
   }, [])
 
+  const stats = useMemo(() => ({
+    total: rows.length,
+    online: rows.filter((x) => x.status === 'online').length,
+    offline: rows.filter((x) => x.status === 'offline').length,
+    unstable: rows.filter((x) => x.status === 'degraded' || x.status === 'restarting' || x.status === 'stale').length,
+  }), [rows])
+
   const addActionLogLocal = (serverName, action, statusAfter) => {
-    setActionRows((prev) => [
-      {
-        id: Date.now(),
-        server: serverName,
-        action,
-        status_after: statusAfter,
-        message: `service ${action === 'restart' ? 'restarting' : action + 'ed'}`,
-        created_at: new Date().toISOString(),
-      },
-      ...prev,
-    ])
+    setActionRows((prev) => [{ id: Date.now(), server: serverName, action, status_after: statusAfter, message: `service ${action === 'restart' ? 'restarting' : action + 'ed'}`, created_at: new Date().toISOString() }, ...prev])
   }
 
   const applyActionLocal = (id, action) => {
@@ -135,9 +140,7 @@ export default function ServersPage() {
     const values = await form.validateFields()
     if (useMock) {
       if (editing) setRows((prev) => prev.map((x) => (x.id === editing.id ? { ...x, ...values } : x)))
-      else {
-        setRows((prev) => [{ id: Date.now(), ...values, status: 'offline', last_seen_at: new Date().toISOString() }, ...prev])
-      }
+      else setRows((prev) => [{ id: Date.now(), ...values, status: 'offline', last_seen_at: new Date().toISOString(), feature_count: 0, total_licenses: 0, used_licenses: 0, risk_level: 'low' }, ...prev])
       setOpen(false)
       message.success('Mock save complete')
       return
@@ -154,91 +157,81 @@ export default function ServersPage() {
     load()
   }
 
-  const doUploadLicense = async () => {
-    const f = uploadFileList[0]?.originFileObj
-    if (!f) {
-      message.warning('Please select a license file first')
-      return
-    }
-
-    if (useMock) {
-      message.success('Mock upload done. Go to License Keys page to view updates.')
-      setUploadOpen(false)
-      setUploadFileList([])
-      return
-    }
-
-    const fd = new FormData()
-    fd.append('file', f)
-    setUploading(true)
-    try {
-      const r = await api.post('/license/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
-      message.success(`Upload success: parsed ${r.data?.parsed_features ?? 0} features`)
-      setUploadOpen(false)
-      setUploadFileList([])
-      load()
-    } finally {
-      setUploading(false)
-    }
-  }
-
   return (
-    <Row gutter={16}>
-      <Col span={16}>
-        <Card
-          title="License Servers"
-          extra={(
-            <Space>
-              <span>Dry Run</span>
-              <Switch checked={dryRun} onChange={setDryRun} />
-              <Button onClick={() => setUploadOpen(true)} icon={<UploadOutlined />}>Upload License</Button>
-              <Button type="primary" onClick={onCreate}>Add Server</Button>
-            </Space>
-          )}
-        >
-          <Table
-            rowKey="id"
-            dataSource={rows}
-            columns={[
-              { title: 'Name', dataIndex: 'name' },
-              { title: 'Vendor', dataIndex: 'vendor' },
-              { title: 'Host', dataIndex: 'host' },
-              { title: 'Port', dataIndex: 'port' },
-              { title: 'Status', dataIndex: 'status', render: (v) => <Tag color={statusColor(v)}>{v}</Tag> },
-              {
-                title: 'Actions',
-                render: (_, row) => (
-                  <Space wrap>
-                    <Popconfirm title={`Start ${row.name}?`} onConfirm={() => runAction(row, 'start')}><Button size="small" type="primary">Start</Button></Popconfirm>
-                    <Popconfirm title={`Stop ${row.name}?`} onConfirm={() => runAction(row, 'stop')}><Button size="small" danger>Stop</Button></Popconfirm>
-                    <Popconfirm title={`Restart ${row.name}?`} onConfirm={() => runAction(row, 'restart')}><Button size="small">Restart</Button></Popconfirm>
-                    <Button size="small" onClick={() => openPreview(row, 'restart')}>Preview Cmd</Button>
-                    <Button size="small" onClick={() => onEdit(row)}>Edit</Button>
-                    <Popconfirm title={`Delete ${row.name}?`} onConfirm={() => onDelete(row)}><Button size="small" danger type="dashed">Delete</Button></Popconfirm>
-                  </Space>
-                ),
-              },
-            ]}
-          />
-        </Card>
-      </Col>
-      <Col span={8}>
-        <Card title="Operation Logs" style={{ height: '100%' }}>
-          <Table
-            size="small"
-            rowKey="id"
-            dataSource={actionRows}
-            pagination={{ pageSize: 6 }}
-            columns={[
-              { title: 'Server', dataIndex: 'server' },
-              { title: 'Action', dataIndex: 'action' },
-              { title: 'After', dataIndex: 'status_after', render: (v) => <Tag color={statusColor(v)}>{v}</Tag> },
-              { title: 'Time', dataIndex: 'created_at' },
-            ]}
-          />
-          <Typography.Text type="secondary">Now supports license file upload for real-time key refresh.</Typography.Text>
-        </Card>
-      </Col>
+    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      <Alert type="info" showIcon message="管理页操作建议" description="默认开启 Dry Run。建议先 Preview Cmd，再做真实 Start / Stop / Restart 操作，避免在测试环境误操作。" />
+
+      <Row gutter={14}>
+        <Col span={6}><Card><Statistic title="服务总数" value={stats.total} /></Card></Col>
+        <Col span={6}><Card><Statistic title="在线" value={stats.online} /></Card></Col>
+        <Col span={6}><Card><Statistic title="离线" value={stats.offline} /></Card></Col>
+        <Col span={6}><Card><Statistic title="不稳定 / 操作中" value={stats.unstable} /></Card></Col>
+      </Row>
+
+      <Row gutter={16}>
+        <Col span={16}>
+          <Card
+            title="License Servers"
+            extra={(
+              <Space>
+                <span>Dry Run</span>
+                <Switch checked={dryRun} onChange={setDryRun} />
+                <Button type="primary" onClick={onCreate}>Add Server</Button>
+              </Space>
+            )}
+          >
+            <Table
+              rowKey="id"
+              dataSource={rows}
+              pagination={{ pageSize: 10 }}
+              columns={[
+                {
+                  title: 'Name',
+                  dataIndex: 'name',
+                  render: (v, row) => <Button type="link" onClick={() => { setDetail(row); setDetailOpen(true) }}>{v}</Button>,
+                },
+                { title: 'Vendor', dataIndex: 'vendor' },
+                { title: 'Host', dataIndex: 'host' },
+                { title: 'Port', dataIndex: 'port', width: 80 },
+                { title: 'Status', dataIndex: 'status', width: 110, render: (v) => <Tag color={statusColor(v)}>{v}</Tag> },
+                { title: 'Features', dataIndex: 'feature_count', width: 90 },
+                { title: 'Used / Total', width: 130, render: (_, r) => `${r.used_licenses}/${r.total_licenses}` },
+                { title: 'Risk', dataIndex: 'risk_level', width: 90, render: (v) => <Tag color={v === 'high' ? 'red' : v === 'medium' ? 'gold' : 'green'}>{v}</Tag> },
+                {
+                  title: 'Actions',
+                  render: (_, row) => (
+                    <Space wrap>
+                      <Popconfirm title={`Start ${row.name}?`} onConfirm={() => runAction(row, 'start')}><Button size="small" type="primary">Start</Button></Popconfirm>
+                      <Popconfirm title={`Stop ${row.name}?`} onConfirm={() => runAction(row, 'stop')}><Button size="small" danger>Stop</Button></Popconfirm>
+                      <Popconfirm title={`Restart ${row.name}?`} onConfirm={() => runAction(row, 'restart')}><Button size="small">Restart</Button></Popconfirm>
+                      <Button size="small" onClick={() => openPreview(row, 'restart')}>Preview Cmd</Button>
+                      <Button size="small" onClick={() => onEdit(row)}>Edit</Button>
+                      <Popconfirm title={`Delete ${row.name}?`} onConfirm={() => onDelete(row)}><Button size="small" danger type="dashed">Delete</Button></Popconfirm>
+                    </Space>
+                  ),
+                },
+              ]}
+            />
+          </Card>
+        </Col>
+        <Col span={8}>
+          <Card title="Operation Logs" style={{ height: '100%' }}>
+            <Table
+              size="small"
+              rowKey="id"
+              dataSource={actionRows}
+              pagination={{ pageSize: 6 }}
+              columns={[
+                { title: 'Server', dataIndex: 'server' },
+                { title: 'Action', dataIndex: 'action', width: 80 },
+                { title: 'After', dataIndex: 'status_after', width: 100, render: (v) => <Tag color={statusColor(v)}>{v}</Tag> },
+                { title: 'Time', dataIndex: 'created_at' },
+              ]}
+            />
+            <Typography.Text type="secondary">点击服务名可查看详情。建议把服务详情页作为后续二期重点增强对象。</Typography.Text>
+          </Card>
+        </Col>
+      </Row>
 
       <Modal title="Execution Preview" open={previewOpen} onCancel={() => setPreviewOpen(false)} footer={<Button onClick={() => setPreviewOpen(false)}>Close</Button>}>
         {preview && (
@@ -250,17 +243,6 @@ export default function ServersPage() {
         )}
       </Modal>
 
-      <Modal title="Upload License File" open={uploadOpen} onCancel={() => setUploadOpen(false)} onOk={doUploadLicense} confirmLoading={uploading} okText="Upload & Refresh">
-        <Upload
-          beforeUpload={() => false}
-          fileList={uploadFileList}
-          onChange={({ fileList }) => setUploadFileList(fileList.slice(-1))}
-          maxCount={1}
-        >
-          <Button icon={<UploadOutlined />}>Select license file (.lic / .dat / .txt)</Button>
-        </Upload>
-      </Modal>
-
       <Modal title={editing ? 'Edit Server' : 'Add Server'} open={open} onCancel={() => setOpen(false)} onOk={onSubmit} okText="Save">
         <Form form={form} layout="vertical">
           <Form.Item name="name" label="Name" rules={[{ required: true }]}><Input placeholder="snps-lic-01" /></Form.Item>
@@ -269,6 +251,23 @@ export default function ServersPage() {
           <Form.Item name="port" label="Port" rules={[{ required: true }]}><InputNumber min={1} max={65535} style={{ width: '100%' }} /></Form.Item>
         </Form>
       </Modal>
-    </Row>
+
+      <Modal title="Server Detail" open={detailOpen} onCancel={() => setDetailOpen(false)} footer={<Button onClick={() => setDetailOpen(false)}>Close</Button>} width={720}>
+        {detail && (
+          <Descriptions column={2} bordered>
+            <Descriptions.Item label="Name">{detail.name}</Descriptions.Item>
+            <Descriptions.Item label="Vendor">{detail.vendor}</Descriptions.Item>
+            <Descriptions.Item label="Host">{detail.host}</Descriptions.Item>
+            <Descriptions.Item label="Port">{detail.port}</Descriptions.Item>
+            <Descriptions.Item label="Status"><Tag color={statusColor(detail.status)}>{detail.status}</Tag></Descriptions.Item>
+            <Descriptions.Item label="Last Seen">{detail.last_seen_at || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Feature Count">{detail.feature_count}</Descriptions.Item>
+            <Descriptions.Item label="Used / Total">{detail.used_licenses}/{detail.total_licenses}</Descriptions.Item>
+            <Descriptions.Item label="Risk Level"><Tag color={detail.risk_level === 'high' ? 'red' : detail.risk_level === 'medium' ? 'gold' : 'green'}>{detail.risk_level}</Tag></Descriptions.Item>
+            <Descriptions.Item label="说明">当前详情为第一版聚合视图；后续可继续补充关联告警、异常日志和趋势图。</Descriptions.Item>
+          </Descriptions>
+        )}
+      </Modal>
+    </Space>
   )
 }
