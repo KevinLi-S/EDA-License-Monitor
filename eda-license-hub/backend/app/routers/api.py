@@ -165,7 +165,16 @@ def health():
 
 @router.get("/dashboard", response_model=DashboardSummary)
 def dashboard(db: Session = Depends(get_db)):
-    key_rows = db.query(LicenseKeyRecord).order_by(desc(LicenseKeyRecord.used)).limit(10).all()
+    key_rows = []
+    for vendor_name in [x[0] for x in db.query(LicenseKeyRecord.vendor).distinct().all() if x and x[0]]:
+        vendor_rows = (
+            db.query(LicenseKeyRecord)
+            .filter(func.lower(LicenseKeyRecord.vendor) == vendor_name.lower())
+            .order_by(desc(LicenseKeyRecord.used), desc(LicenseKeyRecord.total), LicenseKeyRecord.feature)
+            .limit(10)
+            .all()
+        )
+        key_rows.extend(vendor_rows)
 
     if key_rows:
         top_busy = [
@@ -235,7 +244,7 @@ def servers(db: Session = Depends(get_db)):
             db.query(
                 LicenseKeyRecord.vendor,
                 LicenseKeyRecord.server,
-                func.count(func.distinct(LicenseKeyRecord.feature)),
+                func.count(LicenseKeyRecord.id),
                 func.coalesce(func.sum(LicenseKeyRecord.total), 0),
                 func.coalesce(func.sum(LicenseKeyRecord.used), 0),
             )
@@ -551,7 +560,7 @@ async def upload_license(file: UploadFile = File(...), db: Session = Depends(get
         if vendor_name == "synopsys":
             used = min(max(synopsys_used_map.get(feat_name, 0), 0), total_i)
         else:
-            used = min(max(total_i // 2, 0), total_i)
+            used = 0
 
         db.add(
             FeatureSnapshot(

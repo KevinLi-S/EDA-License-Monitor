@@ -101,7 +101,7 @@ export default function DashboardPage() {
         type="info"
         showIcon
         message="当前演示重点"
-        description="建议重点看：服务在线状态、Top Busy Features、风险摘要、最近事件流。后续在 192.168.110.128 上联调时，这几个区域应该最先体现真实异常。"
+        description="当前页面已切到真实数据展示。由于暂未接入实时 checkout/in-use 采集链路，Usage/Used 暂按保守值 0 展示；此页重点看容量、服务状态、风险摘要和最近事件。"
       />
 
       <Row gutter={14}>
@@ -115,13 +115,13 @@ export default function DashboardPage() {
         <Col span={6}><ScoreCard title="Online Servers" value={serverStats.online} color="#16a34a" hint="Healthy nodes" /></Col>
         <Col span={6}><ScoreCard title="Offline Servers" value={serverStats.offline} color="#ef4444" hint="Need inspection" /></Col>
         <Col span={6}><ScoreCard title="Restarting / Degraded" value={serverStats.restarting} color="#f59e0b" hint="Action in progress or unstable" /></Col>
-        <Col span={6}><ScoreCard title="Hot Features" value={hotFeatureCount} color="#7c3aed" hint="Usage >= 85%" /></Col>
+        <Col span={6}><ScoreCard title="Hot Features" value={hotFeatureCount} color="#7c3aed" hint="需要实时使用采集后才有意义" /></Col>
       </Row>
 
       <Row gutter={14}>
         <Col span={16}>
           <Card
-            title="Top Busy Features"
+            title="Feature Capacity Samples"
             style={glass}
             extra={<Select value={vendorFilter} onChange={setVendorFilter} style={{ width: 180 }} options={[{ label: 'All Vendors', value: 'all' }, { label: 'Synopsys', value: 'synopsys' }, { label: 'Cadence', value: 'cadence' }, { label: 'Mentor', value: 'mentor' }, { label: 'Ansys', value: 'ansys' }]} />}
           >
@@ -141,7 +141,7 @@ export default function DashboardPage() {
                   render: (_, r) => {
                     const p = Math.round((r.used / Math.max(r.total, 1)) * 100)
                     const status = p >= 90 ? 'exception' : p >= 75 ? 'active' : 'normal'
-                    return <Progress size="small" percent={p} status={status} />
+                    return <Progress size="small" percent={p} status={status} format={(percent) => `${percent}% (实时占用未接入)`} />
                   },
                 },
               ]}
