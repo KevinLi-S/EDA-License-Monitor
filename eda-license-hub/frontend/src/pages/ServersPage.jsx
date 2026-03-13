@@ -4,6 +4,7 @@ import {
   Card,
   Col,
   Descriptions,
+  Divider,
   Form,
   Input,
   InputNumber,
@@ -16,11 +17,15 @@ import {
   Table,
   Tag,
   Typography,
+  Upload,
   message,
 } from 'antd'
+import { InboxOutlined, UploadOutlined } from '@ant-design/icons'
 import { useEffect, useMemo, useState } from 'react'
 import api, { useMock } from '../api'
 import { mockServerActions, mockServers } from '../mockData'
+
+const { Dragger } = Upload
 
 const statusColor = (v) => {
   if (v === 'online') return 'green'
@@ -39,6 +44,10 @@ export default function ServersPage() {
   const [previewOpen, setPreviewOpen] = useState(false)
   const [detail, setDetail] = useState(null)
   const [detailOpen, setDetailOpen] = useState(false)
+  const [fileList, setFileList] = useState([])
+  const [uploading, setUploading] = useState(false)
+  const [uploadResult, setUploadResult] = useState(null)
+  const [uploadHistory, setUploadHistory] = useState([])
   const [form] = Form.useForm()
 
   const vendorOptions = useMemo(() => ['synopsys', 'cadence', 'mentor', 'ansys'], [])
@@ -112,6 +121,35 @@ export default function ServersPage() {
     load()
   }
 
+  const onUpload = async () => {
+    const fobj = fileList[0]?.originFileObj
+    if (!fobj) {
+      message.warning('Please select a license file first')
+      return
+    }
+
+    if (useMock) {
+      const mockResult = { ok: true, filename: fobj.name, parsed_features: 12, server: 'snps-lic-01', port: 27000 }
+      setUploadResult(mockResult)
+      setUploadHistory((prev) => [{ key: Date.now(), filename: fobj.name, parsed: 12, server: 'snps-lic-01', time: new Date().toLocaleString() }, ...prev])
+      message.success('Mock upload completed')
+      return
+    }
+
+    const fd = new FormData()
+    fd.append('file', fobj)
+    setUploading(true)
+    try {
+      const { data } = await api.post('/license/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      setUploadResult(data)
+      setUploadHistory((prev) => [{ key: Date.now(), filename: data.filename, parsed: data.parsed_features, server: data.server, time: new Date().toLocaleString() }, ...prev])
+      message.success(`Uploaded successfully, parsed ${data?.parsed_features ?? 0} features`)
+      load()
+    } finally {
+      setUploading(false)
+    }
+  }
+
   const onCreate = () => {
     setEditing(null)
     form.resetFields()
@@ -159,13 +197,54 @@ export default function ServersPage() {
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Alert type="info" showIcon message="管理页操作建议" description="默认开启 Dry Run。建议先 Preview Cmd，再做真实 Start / Stop / Restart 操作，避免在测试环境误操作。" />
+      <Alert type="info" showIcon message="Operations" description="Dry Run is enabled by default. Preview commands before real Start / Stop / Restart actions." />
 
       <Row gutter={14}>
-        <Col span={6}><Card><Statistic title="服务总数" value={stats.total} /></Card></Col>
-        <Col span={6}><Card><Statistic title="在线" value={stats.online} /></Card></Col>
-        <Col span={6}><Card><Statistic title="离线" value={stats.offline} /></Card></Col>
-        <Col span={6}><Card><Statistic title="不稳定 / 操作中" value={stats.unstable} /></Card></Col>
+        <Col span={6}><Card><Statistic title="Total Servers" value={stats.total} /></Card></Col>
+        <Col span={6}><Card><Statistic title="Online" value={stats.online} /></Card></Col>
+        <Col span={6}><Card><Statistic title="Offline" value={stats.offline} /></Card></Col>
+        <Col span={6}><Card><Statistic title="Unstable / In Progress" value={stats.unstable} /></Card></Col>
+      </Row>
+
+      <Row gutter={16}>
+        <Col span={12}>
+          <Card title="License Upload">
+            <Typography.Text type="secondary">
+              Upload a license file here to refresh license data and verify the end-to-end linkage.
+            </Typography.Text>
+            <Divider />
+            <Dragger
+              beforeUpload={() => false}
+              maxCount={1}
+              fileList={fileList}
+              onChange={({ fileList: next }) => setFileList(next.slice(-1))}
+              style={{ padding: 16 }}
+            >
+              <p className="ant-upload-drag-icon"><InboxOutlined /></p>
+              <p className="ant-upload-text">Click or drag a .lic / .dat / .txt file here</p>
+              <p className="ant-upload-hint">Use a real license file when validating live data.</p>
+            </Dragger>
+            <Space style={{ marginTop: 16 }}>
+              <Button type="primary" icon={<UploadOutlined />} onClick={onUpload} loading={uploading}>Upload and Parse</Button>
+              <Button onClick={() => { setFileList([]); setUploadResult(null) }}>Clear</Button>
+            </Space>
+          </Card>
+        </Col>
+        <Col span={12}>
+          <Card title="Upload Result" style={{ height: '100%' }}>
+            {uploadResult ? (
+              <Descriptions column={1} bordered size="small">
+                <Descriptions.Item label="File">{uploadResult.filename}</Descriptions.Item>
+                <Descriptions.Item label="Server">{uploadResult.server}</Descriptions.Item>
+                <Descriptions.Item label="Port">{uploadResult.port}</Descriptions.Item>
+                <Descriptions.Item label="Parsed Features">{uploadResult.parsed_features}</Descriptions.Item>
+                <Descriptions.Item label="Status">{uploadResult.ok ? 'Success' : 'Failed'}</Descriptions.Item>
+              </Descriptions>
+            ) : (
+              <Typography.Text type="secondary">Upload a file to see the parse result here.</Typography.Text>
+            )}
+          </Card>
+        </Col>
       </Row>
 
       <Row gutter={16}>
@@ -228,7 +307,7 @@ export default function ServersPage() {
                 { title: 'Time', dataIndex: 'created_at' },
               ]}
             />
-            <Typography.Text type="secondary">点击服务名可查看详情。建议把服务详情页作为后续二期重点增强对象。</Typography.Text>
+            <Typography.Text type="secondary">Click a server name to view details.</Typography.Text>
           </Card>
         </Col>
       </Row>
@@ -264,7 +343,7 @@ export default function ServersPage() {
             <Descriptions.Item label="Feature Count">{detail.feature_count}</Descriptions.Item>
             <Descriptions.Item label="Used / Total">{detail.used_licenses}/{detail.total_licenses}</Descriptions.Item>
             <Descriptions.Item label="Risk Level"><Tag color={detail.risk_level === 'high' ? 'red' : detail.risk_level === 'medium' ? 'gold' : 'green'}>{detail.risk_level}</Tag></Descriptions.Item>
-            <Descriptions.Item label="说明">当前详情为第一版聚合视图；后续可继续补充关联告警、异常日志和趋势图。</Descriptions.Item>
+            <Descriptions.Item label="Notes">This is the first aggregated detail view and can be extended with related alerts, logs, and trends.</Descriptions.Item>
           </Descriptions>
         )}
       </Modal>

@@ -5,7 +5,6 @@ import ServersPage from './pages/ServersPage'
 import AlertsPage from './pages/AlertsPage'
 import LicenseKeysPage from './pages/LicenseKeysPage'
 import LogsPage from './pages/LogsPage'
-import UploadPage from './pages/UploadPage'
 
 const { Header, Content, Sider } = Layout
 
@@ -25,12 +24,11 @@ export default function App() {
           mode="inline"
           selectedKeys={[selected]}
           items={[
-            { key: '/dashboard', label: <Link to="/dashboard">📊 总览 Dashboard</Link> },
-            { key: '/servers', label: <Link to="/servers">🖥️ 服务管理 Servers</Link> },
-            { key: '/license-keys', label: <Link to="/license-keys">🔑 Feature 使用情况</Link> },
-            { key: '/alerts', label: <Link to="/alerts">🚨 告警中心 Alerts</Link> },
-            { key: '/logs', label: <Link to="/logs">📜 日志中心 Logs</Link> },
-            { key: '/upload', label: <Link to="/upload">📤 数据接入 Upload</Link> },
+            { key: '/dashboard', label: <Link to="/dashboard">Dashboard</Link> },
+            { key: '/servers', label: <Link to="/servers">Servers</Link> },
+            { key: '/license-keys', label: <Link to="/license-keys">License Keys</Link> },
+            { key: '/alerts', label: <Link to="/alerts">Alerts</Link> },
+            { key: '/logs', label: <Link to="/logs">Logs</Link> },
           ]}
         />
       </Sider>
@@ -50,7 +48,7 @@ export default function App() {
               License Monitoring & Management Console
             </Typography.Title>
             <Typography.Text style={{ color: 'rgba(255,255,255,.78)' }}>
-              面向模拟生产环境的 EDA License 运维控制台
+              EDA License operations console for the test environment
             </Typography.Text>
           </div>
           <Space>
@@ -66,7 +64,6 @@ export default function App() {
             <Route path="/license-keys" element={<LicenseKeysPage />} />
             <Route path="/alerts" element={<AlertsPage />} />
             <Route path="/logs" element={<LogsPage />} />
-            <Route path="/upload" element={<UploadPage />} />
           </Routes>
         </Content>
       </Layout>
