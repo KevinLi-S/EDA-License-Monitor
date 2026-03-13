@@ -1,4 +1,4 @@
-from app.core.celery_app import celery_app
+from app.celery_app import celery_app
 from app.database import AsyncSessionLocal
 from app.services.collector_service import collector_service
 
