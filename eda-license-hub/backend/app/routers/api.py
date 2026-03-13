@@ -1,5 +1,6 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Dict, List, Tuple
 import os
 import re
 import subprocess
@@ -14,28 +15,61 @@ from app.schemas import DashboardSummary, FeaturePoint, RiskSummary, RiskFinding
 
 router = APIRouter(prefix="/api", tags=["api"])
 
+# 配置常量
+COMMAND_TIMEOUT = 20  # 秒
+MAX_STDOUT_LENGTH = 120
+MAX_STDERR_LENGTH = 180
+MAX_LICENSE_KEYS_LIMIT = 1000
+MAX_LOGS_LIMIT = 5000
 
-def build_vendor_command(vendor: str, host: str, port: int, action: str) -> str:
+
+def server_display_name(vendor: str, server_name: str) -> str:
+    vendor = (vendor or '').strip().lower()
+    server_name = (server_name or 'unknown').strip()
+    return f"{server_name} ({vendor})" if vendor else server_name
+
+
+def build_vendor_command(vendor: str, host: str, port: int, action: str) -> List[str]:
+    """构建 vendor 命令参数列表，防止命令注入"""
     vendor = vendor.lower()
+    server_addr = f"{host}:{port}"
+
     if vendor == "synopsys":
-        return f"snpslmdctl {action} --server {host}:{port}"
+        return ["snpslmdctl", action, "--server", server_addr]
     if vendor == "cadence":
-        return f"cdslmdctl {action} --server {host}:{port}"
+        return ["cdslmdctl", action, "--server", server_addr]
     if vendor == "mentor":
-        return f"mgcldctl {action} --server {host}:{port}"
+        return ["mgcldctl", action, "--server", server_addr]
     if vendor == "ansys":
-        return f"anslic_admin -{action} {host}:{port}"
-    return f"licensectl --vendor {vendor} {action} --server {host}:{port}"
+        return ["anslic_admin", f"-{action}", server_addr]
+    return ["licensectl", "--vendor", vendor, action, "--server", server_addr]
+
+
+def build_vendor_command_str(vendor: str, host: str, port: int, action: str) -> str:
+    """仅用于预览，返回命令字符串"""
+    import shlex
+    cmd_list = build_vendor_command(vendor, host, port, action)
+    return " ".join(shlex.quote(arg) for arg in cmd_list)
 
 
 def log_base_dir() -> Path:
+    """获取日志基础目录，必须通过环境变量 LOG_BASE_DIR 配置"""
     p = os.getenv("LOG_BASE_DIR", "").strip()
-    if p:
-        return Path(p)
-    return Path.home() / "Desktop" / "日志"
+    if not p:
+        raise HTTPException(
+            status_code=500,
+            detail="LOG_BASE_DIR environment variable not configured. Please set it to your log directory path."
+        )
+    log_path = Path(p)
+    if not log_path.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=f"LOG_BASE_DIR path does not exist: {log_path}"
+        )
+    return log_path
 
 
-def iter_vendor_logs(vendor: str) -> list[Path]:
+def iter_vendor_logs(vendor: str) -> List[Path]:
     base = log_base_dir()
     files = []
     exact = base / f"{vendor}.log"
@@ -45,12 +79,12 @@ def iter_vendor_logs(vendor: str) -> list[Path]:
     return files
 
 
-def parse_log_findings(vendor: str, path: Path) -> list[RiskFinding]:
+def parse_log_findings(vendor: str, path: Path) -> List[RiskFinding]:
     if not path.exists():
         return []
 
-    text = path.read_text(encoding="utf-8", errors="ignore")
-    findings: list[RiskFinding] = []
+    text = path.read_text(encoding="utf-8", errors="replace")
+    findings: List[RiskFinding] = []
 
     checks = [
         ("tampered", "critical", "License integrity warning detected", "CVD License file has been Tampered"),
@@ -81,7 +115,7 @@ def build_risk_summary() -> RiskSummary:
     return RiskSummary(critical=critical, high=high, medium=medium, findings=findings)
 
 
-def derive_synopsys_activity_from_log() -> tuple[dict[str, int], dict[str, list[str]]]:
+def derive_synopsys_activity_from_log() -> Tuple[Dict[str, int], Dict[str, List[str]]]:
     """Compute current in-use count and active users per feature from synopsys OUT/IN events."""
     files = iter_vendor_logs("synopsys")
     if not files:
@@ -93,10 +127,10 @@ def derive_synopsys_activity_from_log() -> tuple[dict[str, int], dict[str, list[
     out_re = re.compile(r'OUT:\s+"([^"]+)"\s+([^\s]+)', re.IGNORECASE)
     in_re = re.compile(r'IN:\s+"([^"]+)"\s+([^\s]+)', re.IGNORECASE)
 
-    active_by_feature: dict[str, dict[str, int]] = {}
+    active_by_feature: Dict[str, Dict[str, int]] = {}
 
     for p in files:
-        for line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+        for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
             m_out = out_re.search(line)
             if m_out:
                 feat = m_out.group(1).strip()
@@ -115,8 +149,8 @@ def derive_synopsys_activity_from_log() -> tuple[dict[str, int], dict[str, list[
                     if per_user[user] <= 0:
                         per_user.pop(user, None)
 
-    used: dict[str, int] = {}
-    users: dict[str, list[str]] = {}
+    used: Dict[str, int] = {}
+    users: Dict[str, List[str]] = {}
     for feat, per_user in active_by_feature.items():
         used[feat] = sum(per_user.values())
         users[feat] = sorted(per_user.keys())
@@ -179,7 +213,9 @@ def dashboard(db: Session = Depends(get_db)):
         ]
 
     real_vendor_count = db.query(func.count(func.distinct(LicenseKeyRecord.vendor))).scalar() or 0
-    real_server_count = db.query(func.count(func.distinct(LicenseKeyRecord.server))).scalar() or 0
+    real_server_count = (
+        db.query(func.count(func.distinct(LicenseKeyRecord.vendor + '|' + LicenseKeyRecord.server))).scalar() or 0
+    )
 
     return DashboardSummary(
         vendor_count=real_vendor_count or (db.query(func.count(Vendor.id)).scalar() or 0),
@@ -192,13 +228,22 @@ def dashboard(db: Session = Depends(get_db)):
 
 @router.get("/servers")
 def servers(db: Session = Depends(get_db)):
-    real_server_names = {x[0] for x in db.query(LicenseKeyRecord.server).distinct().all() if x and x[0]}
+    rows = db.query(LicenseServer, Vendor.name).join(Vendor, Vendor.id == LicenseServer.vendor_id).all()
+    server_stats = {
+        (vendor_name.lower(), server_name): (feature_count or 0, total_licenses or 0, used_licenses or 0)
+        for vendor_name, server_name, feature_count, total_licenses, used_licenses in (
+            db.query(
+                LicenseKeyRecord.vendor,
+                LicenseKeyRecord.server,
+                func.count(func.distinct(LicenseKeyRecord.feature)),
+                func.coalesce(func.sum(LicenseKeyRecord.total), 0),
+                func.coalesce(func.sum(LicenseKeyRecord.used), 0),
+            )
+            .group_by(LicenseKeyRecord.vendor, LicenseKeyRecord.server)
+            .all()
+        )
+    }
 
-    q = db.query(LicenseServer, Vendor.name).join(Vendor, Vendor.id == LicenseServer.vendor_id)
-    if real_server_names:
-        q = q.filter(LicenseServer.name.in_(real_server_names))
-
-    rows = q.all()
     return [
         {
             "id": s.id,
@@ -208,8 +253,12 @@ def servers(db: Session = Depends(get_db)):
             "port": s.port,
             "status": s.status,
             "last_seen_at": s.last_seen_at,
+            "feature_count": server_stats.get(((v or '').lower(), server_display_name(v, s.name)), (0, 0, 0))[0],
+            "total_licenses": server_stats.get(((v or '').lower(), server_display_name(v, s.name)), (0, 0, 0))[1],
+            "used_licenses": server_stats.get(((v or '').lower(), server_display_name(v, s.name)), (0, 0, 0))[2],
         }
         for s, v in rows
+        if ((v or '').lower(), server_display_name(v, s.name)) in server_stats or not server_stats
     ]
 
 
@@ -227,7 +276,7 @@ def create_server(req: ServerUpsertRequest, db: Session = Depends(get_db)):
         host=req.host,
         port=req.port,
         status="offline",
-        last_seen_at=datetime.utcnow(),
+        last_seen_at=datetime.now(timezone.utc),
     )
     db.add(server)
     db.commit()
@@ -282,7 +331,7 @@ def server_action_preview(server_id: int, action: str, db: Session = Depends(get
     if action not in {"start", "stop", "restart"}:
         raise HTTPException(status_code=400, detail="action must be start|stop|restart")
 
-    cmd = build_vendor_command(vendor_name, server.host, server.port, action)
+    cmd = build_vendor_command_str(vendor_name, server.host, server.port, action)
     return {"server_id": server_id, "vendor": vendor_name, "action": action, "command": cmd}
 
 
@@ -302,7 +351,9 @@ def server_action(server_id: int, req: ServerActionRequest, db: Session = Depend
     if action not in {"start", "stop", "restart"}:
         raise HTTPException(status_code=400, detail="action must be start|stop|restart")
 
-    cmd = build_vendor_command(vendor_name, server.host, server.port, action)
+    cmd_list = build_vendor_command(vendor_name, server.host, server.port, action)
+    cmd_str = build_vendor_command_str(vendor_name, server.host, server.port, action)
+
     if req.dry_run:
         return {
             "ok": True,
@@ -310,13 +361,13 @@ def server_action(server_id: int, req: ServerActionRequest, db: Session = Depend
             "server_id": server_id,
             "action": action,
             "status": server.status,
-            "command": cmd,
+            "command": cmd_str,
             "message": "Dry run only. No real execution.",
         }
 
     # Real execution mode: run command and only update status if command succeeds.
     try:
-        res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=20)
+        res = subprocess.run(cmd_list, shell=False, capture_output=True, text=True, timeout=COMMAND_TIMEOUT)
         ok = res.returncode == 0
         stdout = (res.stdout or "").strip()
         stderr = (res.stderr or "").strip()
@@ -341,7 +392,7 @@ def server_action(server_id: int, req: ServerActionRequest, db: Session = Depend
             server_id=server.id,
             action=action,
             status_after=server.status,
-            message=f"cmd={cmd}; rc={(0 if ok else 1)}; out={stdout[:120]}; err={stderr[:180]}",
+            message=f"cmd={cmd_str}; rc={(0 if ok else 1)}; out={stdout[:MAX_STDOUT_LENGTH]}; err={stderr[:MAX_STDERR_LENGTH]}",
         )
     )
     db.commit()
@@ -352,7 +403,7 @@ def server_action(server_id: int, req: ServerActionRequest, db: Session = Depend
         "server_id": server_id,
         "action": action,
         "status": server.status,
-        "command": cmd,
+        "command": cmd_str,
         "stdout": stdout,
         "stderr": stderr,
     }
@@ -406,11 +457,12 @@ def features(db: Session = Depends(get_db)):
 
 @router.post("/license/upload")
 async def upload_license(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    content = (await file.read()).decode("utf-8", errors="ignore")
+    content = (await file.read()).decode("utf-8", errors="replace")
     lines = [x.strip() for x in content.splitlines() if x.strip()]
 
     server_line = next((x for x in lines if x.upper().startswith("SERVER ")), "")
     daemon_line = next((x for x in lines if x.upper().startswith("DAEMON ")), "")
+    vendor_line = next((x for x in lines if x.upper().startswith("VENDOR ")), "")
 
     server_name = "uploaded-lic-01"
     server_port = 27000
@@ -424,15 +476,18 @@ async def upload_license(file: UploadFile = File(...), db: Session = Depends(get
                 pass
 
     vendor_name = "synopsys"
-    if daemon_line:
-        p = daemon_line.split()
+    daemon_or_vendor_line = daemon_line or vendor_line
+    if daemon_or_vendor_line:
+        p = daemon_or_vendor_line.split()
         daemon_token = (p[1].lower() if len(p) >= 2 else "")
         if "snpslmd" in daemon_token:
             vendor_name = "synopsys"
         elif "cdslmd" in daemon_token or "cds" in daemon_token:
             vendor_name = "cadence"
-        elif "mgcld" in daemon_token or "mentor" in daemon_token:
+        elif "mgcld" in daemon_token or "mentor" in daemon_token or "saltd" in daemon_token:
             vendor_name = "mentor"
+        elif "ansyslmd" in daemon_token or "ansys" in daemon_token:
+            vendor_name = "ansys"
 
     fn = (file.filename or "").lower()
     if fn.startswith("cadence_"):
@@ -441,6 +496,8 @@ async def upload_license(file: UploadFile = File(...), db: Session = Depends(get
         vendor_name = "mentor"
     elif fn.startswith("synopsys_"):
         vendor_name = "synopsys"
+    elif fn.startswith("ansys_"):
+        vendor_name = "ansys"
 
     vendor = db.query(Vendor).filter(func.lower(Vendor.name) == vendor_name).first()
     if not vendor:
@@ -448,7 +505,11 @@ async def upload_license(file: UploadFile = File(...), db: Session = Depends(get
         db.add(vendor)
         db.flush()
 
-    server = db.query(LicenseServer).filter(LicenseServer.name == server_name).first()
+    server = (
+        db.query(LicenseServer)
+        .filter(LicenseServer.vendor_id == vendor.id, LicenseServer.name == server_name, LicenseServer.port == server_port)
+        .first()
+    )
     if not server:
         server = LicenseServer(
             vendor_id=vendor.id,
@@ -456,7 +517,7 @@ async def upload_license(file: UploadFile = File(...), db: Session = Depends(get
             host=server_name,
             port=server_port,
             status="online",
-            last_seen_at=datetime.utcnow(),
+            last_seen_at=datetime.now(timezone.utc),
         )
         db.add(server)
         db.flush()
@@ -475,15 +536,10 @@ async def upload_license(file: UploadFile = File(...), db: Session = Depends(get
             continue
 
         feat_name, daemon, version, expiry, total = m.groups()
-        vendor_row = db.query(Vendor).filter(func.lower(Vendor.name) == vendor_name).first()
-        if not vendor_row:
-            vendor_row = Vendor(name=vendor_name)
-            db.add(vendor_row)
-            db.flush()
 
-        feature = db.query(Feature).filter(Feature.vendor_id == vendor_row.id, Feature.name == feat_name).first()
+        feature = db.query(Feature).filter(Feature.vendor_id == vendor.id, Feature.name == feat_name).first()
         if not feature:
-            feature = Feature(vendor_id=vendor_row.id, name=feat_name)
+            feature = Feature(vendor_id=vendor.id, name=feat_name)
             db.add(feature)
             db.flush()
 
@@ -504,7 +560,7 @@ async def upload_license(file: UploadFile = File(...), db: Session = Depends(get
                 total=total_i,
                 used=used,
                 free=total_i - used,
-                collected_at=datetime.utcnow(),
+                collected_at=datetime.now(timezone.utc),
             )
         )
 
@@ -516,9 +572,9 @@ async def upload_license(file: UploadFile = File(...), db: Session = Depends(get
                 total=total_i,
                 used=used,
                 expiry=expiry,
-                server=server_name,
+                server=server_display_name(vendor_name, server_name),
                 source_file=file.filename or "",
-                collected_at=datetime.utcnow(),
+                collected_at=datetime.now(timezone.utc),
             )
         )
         created += 1
@@ -540,6 +596,9 @@ async def upload_license(file: UploadFile = File(...), db: Session = Depends(get
 
 @router.get("/license-keys")
 def license_keys(vendor: str = "all", keyword: str = "", limit: int = 500, db: Session = Depends(get_db)):
+    # 验证并限制 limit 参数
+    limit = max(1, min(limit, MAX_LICENSE_KEYS_LIMIT))
+
     syn_used, syn_users = derive_synopsys_activity_from_log()
 
     q = db.query(LicenseKeyRecord)
@@ -599,7 +658,9 @@ def license_keys(vendor: str = "all", keyword: str = "", limit: int = 500, db: S
 
 
 @router.get("/license-logs")
-def license_logs(vendor: str = "all", keyword: str = "", mode: str = "full", limit: int = 5000):
+def license_logs(vendor: str = "all", keyword: str = "", mode: str = "full", limit: int = 1000):
+    # 验证并限制 limit 参数
+    limit = max(1, min(limit, MAX_LOGS_LIMIT))
     files = []
     if vendor in {"all", "synopsys"}:
         files.extend([("synopsys", p) for p in iter_vendor_logs("synopsys")])
@@ -613,13 +674,12 @@ def license_logs(vendor: str = "all", keyword: str = "", mode: str = "full", lim
     patterns = ["error", "denied", "failed", "tampered", "unsupported", "cannot", "refused", "expired"]
     keyword = (keyword or "").strip().lower()
     mode = (mode or "full").lower()
-    limit = max(1, min(limit, 20000))
 
     out = []
     for v, p in files:
         if not p.exists():
             continue
-        lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
+        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
         for i, line in enumerate(lines, start=1):
             low = line.lower()
             match_error = any(k in low for k in patterns)
