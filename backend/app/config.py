@@ -1,5 +1,5 @@
-from pydantic_settings import BaseSettings
-from typing import Optional
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -25,8 +25,18 @@ class Settings(BaseSettings):
     COLLECTION_INTERVAL_SECONDS: int = 30
     LMSTAT_TIMEOUT_SECONDS: int = 10
 
-    class Config:
-        env_file = ".env"
+    model_config = SettingsConfigDict(env_file=".env")
+
+    @field_validator("JWT_SECRET")
+    @classmethod
+    def validate_jwt_secret(cls, v: str) -> str:
+        """Warn if JWT_SECRET uses default value."""
+        if v == "your-secret-key-change-in-production":
+            raise ValueError(
+                "JWT_SECRET must be changed from default value. "
+                "Please set a secure secret key in production."
+            )
+        return v
 
 
 settings = Settings()
