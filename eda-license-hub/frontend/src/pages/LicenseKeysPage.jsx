@@ -15,6 +15,7 @@ export default function LicenseKeysPage() {
   const [vendorFilter, setVendorFilter] = useState('all')
   const [selectedUsers, setSelectedUsers] = useState([])
   const [userOpen, setUserOpen] = useState(false)
+  const [totalCount, setTotalCount] = useState(0)
 
   const load = async (v = vendorFilter, k = keyword) => {
     try {
@@ -22,13 +23,19 @@ export default function LicenseKeysPage() {
         const base = mockLicenseKeys.filter((x) => v === 'all' || String(x.vendor).toLowerCase() === v)
         const out = k.trim() ? base.filter((r) => [r.feature, r.vendor, r.version, r.server].join(' ').toLowerCase().includes(k.toLowerCase())) : base
         setRows(out.map((r) => ({ ...r, free: Math.max((r.total || 0) - (r.used || 0), 0), active_user_count: r.active_user_count || 0, active_users: r.active_users || [] })))
+        setTotalCount(out.length)
         return
       }
-      const r = await api.get('/license-keys', { params: { vendor: v, keyword: k, limit: 2000 } })
-      setRows((Array.isArray(r.data) ? r.data : []).map((x) => ({ ...x, free: Math.max((x.total || 0) - (x.used || 0), 0) })))
+      const [countRes, listRes] = await Promise.all([
+        api.get('/license-keys-count', { params: { vendor: v, keyword: k } }),
+        api.get('/license-keys', { params: { vendor: v, keyword: k, limit: 500 } }),
+      ])
+      setTotalCount(Number(countRes?.data?.count || 0))
+      setRows((Array.isArray(listRes.data) ? listRes.data : []).map((x) => ({ ...x, free: Math.max((x.total || 0) - (x.used || 0), 0) })))
     } catch (e) {
       console.error(e)
       setRows([])
+      setTotalCount(0)
       message.error('License Keys 加载失败，请检查后端服务或刷新重试')
     }
   }
@@ -40,12 +47,12 @@ export default function LicenseKeysPage() {
   const onSearch = () => load(vendorFilter, keyword)
 
   const summary = useMemo(() => {
-    const total = rows.length
+    const total = totalCount
     const hot = rows.filter((r) => (r.used / Math.max(r.total, 1)) >= 0.85).length
     const active = rows.filter((r) => (r.active_user_count || 0) > 0).length
     const expiring = rows.filter((r) => String(r.expiry || '').startsWith('2026')).length
     return { total, hot, active, expiring }
-  }, [rows])
+  }, [rows, totalCount])
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>

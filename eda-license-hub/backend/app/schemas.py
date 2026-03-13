@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import List
 from pydantic import BaseModel
 
 
@@ -23,14 +24,14 @@ class RiskSummary(BaseModel):
     critical: int
     high: int
     medium: int
-    findings: list[RiskFinding]
+    findings: List[RiskFinding]
 
 
 class DashboardSummary(BaseModel):
     vendor_count: int
     server_count: int
     open_alerts: int
-    top_busy_features: list[FeaturePoint]
+    top_busy_features: List[FeaturePoint]
     risk_summary: RiskSummary
 
 

@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Optional
 from sqlalchemy import DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,7 +22,7 @@ class LicenseServer(Base):
     host: Mapped[str] = mapped_column(String(128))
     port: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(32), default="unknown")
-    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class Feature(Base):
@@ -50,11 +51,11 @@ class Alert(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     type: Mapped[str] = mapped_column(String(64), index=True)
     severity: Mapped[str] = mapped_column(String(16), default="medium")
-    server_id: Mapped[int | None] = mapped_column(ForeignKey("license_servers.id"), nullable=True)
-    feature_id: Mapped[int | None] = mapped_column(ForeignKey("features.id"), nullable=True)
+    server_id: Mapped[Optional[int]] = mapped_column(ForeignKey("license_servers.id"), nullable=True)
+    feature_id: Mapped[Optional[int]] = mapped_column(ForeignKey("features.id"), nullable=True)
     message: Mapped[str] = mapped_column(String(256))
     status: Mapped[str] = mapped_column(String(32), default="open")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class ServerActionLog(Base):
@@ -65,7 +66,7 @@ class ServerActionLog(Base):
     action: Mapped[str] = mapped_column(String(32), index=True)
     status_after: Mapped[str] = mapped_column(String(32))
     message: Mapped[str] = mapped_column(String(256), default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class LicenseKeyRecord(Base):
@@ -80,4 +81,4 @@ class LicenseKeyRecord(Base):
     expiry: Mapped[str] = mapped_column(String(32), default="N/A")
     server: Mapped[str] = mapped_column(String(128), default="unknown")
     source_file: Mapped[str] = mapped_column(String(256), default="")
-    collected_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    collected_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

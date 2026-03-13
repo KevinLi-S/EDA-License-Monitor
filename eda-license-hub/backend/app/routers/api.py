@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api", tags=["api"])
 COMMAND_TIMEOUT = 20  # 秒
 MAX_STDOUT_LENGTH = 120
 MAX_STDERR_LENGTH = 180
-MAX_LICENSE_KEYS_LIMIT = 1000
+MAX_LICENSE_KEYS_LIMIT = 20000
 MAX_LOGS_LIMIT = 5000
 
 
@@ -603,6 +603,17 @@ async def upload_license(file: UploadFile = File(...), db: Session = Depends(get
     return {"ok": True, "parsed_features": created, "filename": file.filename, "server": server_name, "port": server_port}
 
 
+@router.get("/license-keys-count")
+def license_keys_count(vendor: str = "all", keyword: str = "", db: Session = Depends(get_db)):
+    q = db.query(LicenseKeyRecord)
+    if vendor != "all":
+        q = q.filter(func.lower(LicenseKeyRecord.vendor) == vendor.lower())
+    if keyword.strip():
+        kw = f"%{keyword.strip()}%"
+        q = q.filter(LicenseKeyRecord.feature.ilike(kw))
+    return {"count": q.count()}
+
+
 @router.get("/license-keys")
 def license_keys(vendor: str = "all", keyword: str = "", limit: int = 500, db: Session = Depends(get_db)):
     # 验证并限制 limit 参数
@@ -617,7 +628,7 @@ def license_keys(vendor: str = "all", keyword: str = "", limit: int = 500, db: S
         kw = f"%{keyword.strip()}%"
         q = q.filter(LicenseKeyRecord.feature.ilike(kw))
 
-    records = q.order_by(desc(LicenseKeyRecord.collected_at)).limit(max(1, min(limit, 5000))).all()
+    records = q.order_by(desc(LicenseKeyRecord.collected_at)).limit(max(1, min(limit, MAX_LICENSE_KEYS_LIMIT))).all()
     if records:
         out = []
         for r in records:
