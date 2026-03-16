@@ -12,6 +12,18 @@ type Server = {
   usage_percent: number
 }
 
+type LicenseKey = {
+  id: number
+  key_name: string
+  vendor: string
+  version: string | null
+  server_name: string
+  issued: number
+  used: number
+  available: number
+  usage_percent: number
+}
+
 function getUsageTone(usagePercent: number) {
   if (usagePercent >= 90) return 'danger'
   if (usagePercent >= 75) return 'warning'
@@ -20,9 +32,15 @@ function getUsageTone(usagePercent: number) {
 
 export default function Dashboard() {
   const [servers, setServers] = useState<Server[]>([])
+  const [keys, setKeys] = useState<LicenseKey[]>([])
 
   useEffect(() => {
-    apiGet<Server[]>('/servers').then(setServers).catch(console.error)
+    Promise.all([apiGet<Server[]>('/servers'), apiGet<LicenseKey[]>('/licenses/keys')])
+      .then(([serverData, keyData]) => {
+        setServers(serverData)
+        setKeys(keyData)
+      })
+      .catch(console.error)
   }, [])
 
   const vendorOverview = useMemo(() => {
@@ -37,22 +55,19 @@ export default function Dashboard() {
     }, {})
 
     return Object.entries(grouped)
-      .map(([vendor, value]) => ({
-        vendor,
-        ...value,
-      }))
+      .map(([vendor, value]) => ({ vendor, ...value }))
       .sort((a, b) => b.maxUsage - a.maxUsage)
   }, [servers])
+
+  const topFeatures = useMemo(() => [...keys].sort((a, b) => b.usage_percent - a.usage_percent).slice(0, 10), [keys])
 
   const stats = useMemo(() => {
     const vendorCount = vendorOverview.length
     const serviceCount = servers.length
-    const highRisk = servers.filter((server) => server.usage_percent >= 90).length
-    const avgUsage = servers.length
-      ? servers.reduce((sum, server) => sum + server.usage_percent, 0) / servers.length
-      : 0
+    const highRisk = topFeatures.filter((feature) => feature.usage_percent >= 90).length
+    const avgUsage = servers.length ? servers.reduce((sum, server) => sum + server.usage_percent, 0) / servers.length : 0
     return { vendorCount, serviceCount, highRisk, avgUsage }
-  }, [servers, vendorOverview])
+  }, [servers, vendorOverview, topFeatures])
 
   return (
     <div className='page-stack'>
@@ -60,12 +75,12 @@ export default function Dashboard() {
         <div>
           <p className='eyebrow'>控制中心</p>
           <h3>各厂家 License 服务概览</h3>
-          <p>Dashboard 不再强调趋势图，而是集中展示各家 license 服务运行情况、容量压力和服务分布。</p>
+          <p>Dashboard 集中展示各家 license 服务运行情况、容量压力和关键 feature 热点。</p>
         </div>
         <div className='header-chip-row'>
           <span className='status-pill'>{stats.vendorCount} 个厂家</span>
           <span className='status-pill online'>{stats.serviceCount} 个服务</span>
-          <span className={`status-pill ${stats.highRisk ? 'danger' : 'online'}`}>{stats.highRisk} 个高风险服务</span>
+          <span className={`status-pill ${stats.highRisk ? 'danger' : 'online'}`}>{stats.highRisk} 个高风险 feature</span>
         </div>
       </section>
 
@@ -124,53 +139,51 @@ export default function Dashboard() {
       <section className='panel table-panel'>
         <div className='panel-header'>
           <div>
-            <p className='eyebrow'>服务明细</p>
-            <h3>各厂家 License 服务列表</h3>
+            <p className='eyebrow'>热点明细</p>
+            <h3>Feature 使用率前 10</h3>
           </div>
-          <span className='status-pill'>{servers.length} 行</span>
+          <span className='status-pill'>{topFeatures.length} 行</span>
         </div>
         <div className='table-wrap'>
           <table className='data-table'>
             <thead>
               <tr>
-                <th>服务名称</th>
+                <th>Feature</th>
                 <th>厂家</th>
-                <th>端点</th>
-                <th>状态</th>
-                <th>Features</th>
-                <th>峰值使用率</th>
+                <th>服务</th>
+                <th>Issued</th>
+                <th>Used</th>
+                <th>Available</th>
+                <th>使用率</th>
               </tr>
             </thead>
             <tbody>
-              {servers.map((server) => (
-                <tr key={server.id}>
+              {topFeatures.map((feature) => (
+                <tr key={feature.id}>
                   <td>
                     <div className='table-primary'>
-                      <strong>{server.name}</strong>
-                      <span>服务 #{server.id}</span>
+                      <strong>{feature.key_name}</strong>
+                      <span>{feature.version || '未标注版本'}</span>
                     </div>
                   </td>
-                  <td>{server.vendor}</td>
-                  <td>{server.host}:{server.port}</td>
-                  <td>
-                    <span className={`status-pill ${['up', 'online'].includes(server.status.toLowerCase()) ? 'online' : 'warning'}`}>
-                      {server.status}
-                    </span>
-                  </td>
-                  <td>{server.feature_count}</td>
+                  <td>{feature.vendor}</td>
+                  <td>{feature.server_name}</td>
+                  <td>{feature.issued}</td>
+                  <td>{feature.used}</td>
+                  <td>{feature.available}</td>
                   <td>
                     <div className='usage-cell'>
                       <div className='bar-track slim'>
-                        <div className={`bar-fill ${getUsageTone(server.usage_percent)}`} style={{ width: `${Math.min(server.usage_percent, 100)}%` }} />
+                        <div className={`bar-fill ${getUsageTone(feature.usage_percent)}`} style={{ width: `${Math.min(feature.usage_percent, 100)}%` }} />
                       </div>
-                      <span>{server.usage_percent.toFixed(1)}%</span>
+                      <span>{feature.usage_percent.toFixed(1)}%</span>
                     </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {!servers.length && <div className='empty-state padded'>当前还没有返回服务列表数据。</div>}
+          {!topFeatures.length && <div className='empty-state padded'>当前还没有返回 feature 使用率数据。</div>}
         </div>
       </section>
     </div>
