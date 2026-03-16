@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, func
+from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -27,12 +27,21 @@ class LicenseServer(TimestampMixin, Base):
     source_type: Mapped[str] = mapped_column(String(20), default='lmutil', nullable=False)
     lmstat_args: Mapped[str | None] = mapped_column(String(500), nullable=True)
     sample_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    license_file_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    license_log_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     last_check_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     last_error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    static_grants_last_parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    static_grants_parse_error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    log_last_parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    log_parse_error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
     # Relationships (will be populated when Feature model is created)
-    features = relationship('LicenseFeature', back_populates='server', cascade='all, delete-orphan')
+    features = relationship('LicenseFeature', back_populates='server', cascade='all, delete-orphan', lazy='selectin')
+    license_file_asset = relationship('LicenseFileAsset', back_populates='server', cascade='all, delete-orphan', uselist=False, lazy='selectin')
+    static_license_grants = relationship('StaticLicenseGrant', back_populates='server', cascade='all, delete-orphan', lazy='selectin')
+    log_events = relationship('LicenseLogEvent', back_populates='server', cascade='all, delete-orphan', lazy='selectin')
 
     def __repr__(self):
         return f"<LicenseServer(id={self.id}, name='{self.name}', vendor='{self.vendor}')>"
