@@ -1,19 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { apiGet } from '../services/api'
 
-type Overview = {
-  kpis: Array<{ label: string; value: string; trend: string }>
-  servers: Array<{ id: number; name: string; vendor: string; usage_percent: number; status: string }>
-  alerts: Array<{ id: number; severity: string; message: string }>
-}
-
-const severityRank: Record<string, number> = {
-  critical: 4,
-  high: 3,
-  warning: 2,
-  medium: 2,
-  info: 1,
-  low: 1,
+type Server = {
+  id: number
+  name: string
+  vendor: string
+  host: string
+  port: number
+  status: string
+  feature_count: number
+  usage_percent: number
 }
 
 function getUsageTone(usagePercent: number) {
@@ -22,196 +18,146 @@ function getUsageTone(usagePercent: number) {
   return 'ok'
 }
 
-function buildMiniChartPath(points: number[], width: number, height: number) {
-  if (!points.length) return ''
-  const max = Math.max(...points, 1)
-  const min = Math.min(...points, 0)
-  const range = Math.max(max - min, 1)
-  return points
-    .map((point, index) => {
-      const x = points.length === 1 ? width / 2 : (index / (points.length - 1)) * width
-      const y = height - ((point - min) / range) * height
-      return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`
-    })
-    .join(' ')
-}
-
 export default function Dashboard() {
-  const [data, setData] = useState<Overview>({ kpis: [], servers: [], alerts: [] })
-  const [loading, setLoading] = useState(true)
+  const [servers, setServers] = useState<Server[]>([])
 
   useEffect(() => {
-    setLoading(true)
-    apiGet<Overview>('/overview')
-      .then(setData)
-      .catch(console.error)
-      .finally(() => setLoading(false))
+    apiGet<Server[]>('/servers').then(setServers).catch(console.error)
   }, [])
 
-  const computed = useMemo(() => {
-    const onlineServers = data.servers.filter((server) => ['online', 'up'].includes(server.status.toLowerCase())).length
-    const avgUsage = data.servers.length
-      ? data.servers.reduce((sum, server) => sum + server.usage_percent, 0) / data.servers.length
-      : 0
-    const topAlert = [...data.alerts].sort(
-      (a, b) => (severityRank[b.severity.toLowerCase()] ?? 0) - (severityRank[a.severity.toLowerCase()] ?? 0),
-    )[0]
-    const highestUsage = [...data.servers].sort((a, b) => b.usage_percent - a.usage_percent).slice(0, 6)
-    const miniSeries = data.servers.map((server) => server.usage_percent)
+  const vendorOverview = useMemo(() => {
+    const grouped = servers.reduce<Record<string, { serviceCount: number; featureCount: number; maxUsage: number; onlineCount: number }>>((acc, server) => {
+      const key = server.vendor || 'unknown'
+      if (!acc[key]) acc[key] = { serviceCount: 0, featureCount: 0, maxUsage: 0, onlineCount: 0 }
+      acc[key].serviceCount += 1
+      acc[key].featureCount += server.feature_count
+      acc[key].maxUsage = Math.max(acc[key].maxUsage, server.usage_percent)
+      if (['up', 'online'].includes(server.status.toLowerCase())) acc[key].onlineCount += 1
+      return acc
+    }, {})
 
-    return {
-      onlineServers,
-      avgUsage,
-      topAlert,
-      highestUsage,
-      miniChartPath: buildMiniChartPath(miniSeries, 280, 88),
-    }
-  }, [data])
+    return Object.entries(grouped)
+      .map(([vendor, value]) => ({
+        vendor,
+        ...value,
+      }))
+      .sort((a, b) => b.maxUsage - a.maxUsage)
+  }, [servers])
+
+  const stats = useMemo(() => {
+    const vendorCount = vendorOverview.length
+    const serviceCount = servers.length
+    const highRisk = servers.filter((server) => server.usage_percent >= 90).length
+    const avgUsage = servers.length
+      ? servers.reduce((sum, server) => sum + server.usage_percent, 0) / servers.length
+      : 0
+    return { vendorCount, serviceCount, highRisk, avgUsage }
+  }, [servers, vendorOverview])
 
   return (
     <div className='page-stack'>
       <section className='section-header-card'>
         <div>
           <p className='eyebrow'>控制中心</p>
-          <h3>许可证运行总览</h3>
-          <p>
-            参考 layout-B 的后台布局风格，重点展示运行状态、容量压力与风险概览；底层仍沿用现有 phase-2 接口。
-          </p>
+          <h3>各厂家 License 服务概览</h3>
+          <p>Dashboard 不再强调趋势图，而是集中展示各家 license 服务运行情况、容量压力和服务分布。</p>
         </div>
         <div className='header-chip-row'>
-          <span className='status-pill online'>{computed.onlineServers}/{data.servers.length || 0} 台在线</span>
-          <span className='status-pill'>平均峰值 {computed.avgUsage.toFixed(1)}%</span>
-          <span className={`status-pill ${computed.topAlert ? 'danger' : 'online'}`}>
-            {computed.topAlert ? `最高告警 ${computed.topAlert.severity.toUpperCase()}` : '当前无活动告警'}
-          </span>
+          <span className='status-pill'>{stats.vendorCount} 个厂家</span>
+          <span className='status-pill online'>{stats.serviceCount} 个服务</span>
+          <span className={`status-pill ${stats.highRisk ? 'danger' : 'online'}`}>{stats.highRisk} 个高风险服务</span>
         </div>
       </section>
 
-      <section className='charts-row'>
-        <article className='panel trend-panel'>
-          <div className='panel-header'>
-            <div>
-              <p className='eyebrow'>趋势区域</p>
-              <h3>使用趋势快照</h3>
-            </div>
-            <span className='status-pill'>实时概览</span>
-          </div>
-          <div className='trend-chart real'>
-            <svg viewBox='0 0 320 160' className='dashboard-mini-chart'>
-              <g transform='translate(16,18)'>
-                <line x1='0' y1='30' x2='280' y2='30' className='chart-threshold-line warning' />
-                <line x1='0' y1='14' x2='280' y2='14' className='chart-threshold-line danger' />
-                <path d={computed.miniChartPath} className='chart-line' />
-              </g>
-            </svg>
-            <div className='trend-legend'>
-              <strong>{computed.avgUsage.toFixed(1)}%</strong>
-              <span>当前服务器平均峰值使用率</span>
-            </div>
-            <div className='threshold-legend compact'>
-              <span><i className='threshold-dot warning' /> 75% 关注</span>
-              <span><i className='threshold-dot danger' /> 90% 高风险</span>
-            </div>
-          </div>
+      <section className='kpi-grid compact'>
+        <article className='metric-card'>
+          <p>厂家数量</p>
+          <h3>{stats.vendorCount}</h3>
+          <span>当前纳入监控的 vendor 数</span>
         </article>
-
-        <article className='panel'>
-          <div className='panel-header'>
-            <div>
-              <p className='eyebrow'>状态面板</p>
-              <h3>服务器姿态</h3>
-            </div>
-          </div>
-          <div className='status-list'>
-            {data.servers.map((server) => (
-              <div key={server.id} className='status-item'>
-                <div className='status-item-main'>
-                  <span className={`status-indicator ${['online', 'up'].includes(server.status.toLowerCase()) ? 'ok' : 'down'}`} />
-                  <div>
-                    <strong>{server.name}</strong>
-                    <span>{server.vendor}</span>
-                  </div>
-                </div>
-                <span className={`status-pill ${['online', 'up'].includes(server.status.toLowerCase()) ? 'online' : 'warning'}`}>
-                  {server.status}
-                </span>
-              </div>
-            ))}
-            {!data.servers.length && <div className='empty-state'>/overview 暂时还没有返回服务器数据。</div>}
-          </div>
+        <article className='metric-card'>
+          <p>服务数量</p>
+          <h3>{stats.serviceCount}</h3>
+          <span>当前 license service 总数</span>
+        </article>
+        <article className='metric-card'>
+          <p>平均峰值使用率</p>
+          <h3>{stats.avgUsage.toFixed(1)}%</h3>
+          <span>基于所有服务的 usage_percent</span>
         </article>
       </section>
 
-      <section className='kpi-grid dashboard-kpis'>
-        {data.kpis.map((kpi) => (
-          <article key={kpi.label} className='metric-card'>
-            <p>{kpi.label}</p>
-            <h3>{kpi.value}</h3>
-            <span>{kpi.trend}</span>
+      <section className='vendor-overview-grid'>
+        {vendorOverview.map((vendor) => (
+          <article key={vendor.vendor} className={`vendor-card ${getUsageTone(vendor.maxUsage)}`}>
+            <div className='vendor-card-head'>
+              <div>
+                <p className='eyebrow'>Vendor</p>
+                <h4>{vendor.vendor}</h4>
+              </div>
+              <span className={`status-pill ${getUsageTone(vendor.maxUsage) === 'danger' ? 'danger' : getUsageTone(vendor.maxUsage) === 'warning' ? 'warning' : 'online'}`}>
+                峰值 {vendor.maxUsage.toFixed(1)}%
+              </span>
+            </div>
+            <div className='vendor-card-body'>
+              <div>
+                <strong>{vendor.serviceCount}</strong>
+                <span>服务数</span>
+              </div>
+              <div>
+                <strong>{vendor.onlineCount}</strong>
+                <span>在线数</span>
+              </div>
+              <div>
+                <strong>{vendor.featureCount}</strong>
+                <span>Feature 数</span>
+              </div>
+            </div>
+            <div className='bar-track'>
+              <div className={`bar-fill ${getUsageTone(vendor.maxUsage)}`} style={{ width: `${Math.min(vendor.maxUsage, 100)}%` }} />
+            </div>
           </article>
         ))}
-        {data.kpis.length === 0 && (
-          <article className='metric-card muted'>
-            <p>总览数据流</p>
-            <h3>{loading ? '加载中…' : '暂无数据'}</h3>
-            <span>等待 /overview 返回结果</span>
-          </article>
-        )}
-      </section>
-
-      <section className='license-grid'>
-        {computed.highestUsage.map((server) => {
-          const tone = getUsageTone(server.usage_percent)
-          return (
-            <article key={server.id} className={`license-card ${tone}`}>
-              <div className='license-name'>{server.vendor}</div>
-              <div className='license-usage'>{server.usage_percent.toFixed(1)}%</div>
-              <div className='usage-bar'>
-                <div className={`usage-fill ${tone}`} style={{ width: `${Math.min(server.usage_percent, 100)}%` }} />
-              </div>
-              <div className='license-detail'>
-                {server.name} • {server.status}
-              </div>
-            </article>
-          )
-        })}
-        {!computed.highestUsage.length && <div className='empty-state'>有服务器数据后，这里会显示高使用率卡片。</div>}
+        {!vendorOverview.length && <div className='empty-state padded'>当前还没有可展示的厂家服务概览数据。</div>}
       </section>
 
       <section className='panel table-panel'>
         <div className='panel-header'>
           <div>
-            <p className='eyebrow'>运行明细</p>
-            <h3>服务器使用详情</h3>
+            <p className='eyebrow'>服务明细</p>
+            <h3>各厂家 License 服务列表</h3>
           </div>
-          <span className='status-pill'>{data.servers.length} 行</span>
+          <span className='status-pill'>{servers.length} 行</span>
         </div>
         <div className='table-wrap'>
           <table className='data-table'>
             <thead>
               <tr>
-                <th>服务器</th>
-                <th>厂商</th>
+                <th>服务名称</th>
+                <th>厂家</th>
+                <th>端点</th>
                 <th>状态</th>
+                <th>Features</th>
                 <th>峰值使用率</th>
-                <th>风险</th>
               </tr>
             </thead>
             <tbody>
-              {data.servers.map((server) => (
+              {servers.map((server) => (
                 <tr key={server.id}>
                   <td>
                     <div className='table-primary'>
                       <strong>{server.name}</strong>
-                      <span>服务器 #{server.id}</span>
+                      <span>服务 #{server.id}</span>
                     </div>
                   </td>
                   <td>{server.vendor}</td>
+                  <td>{server.host}:{server.port}</td>
                   <td>
-                    <span className={`status-pill ${['online', 'up'].includes(server.status.toLowerCase()) ? 'online' : 'warning'}`}>
+                    <span className={`status-pill ${['up', 'online'].includes(server.status.toLowerCase()) ? 'online' : 'warning'}`}>
                       {server.status}
                     </span>
                   </td>
+                  <td>{server.feature_count}</td>
                   <td>
                     <div className='usage-cell'>
                       <div className='bar-track slim'>
@@ -220,20 +166,11 @@ export default function Dashboard() {
                       <span>{server.usage_percent.toFixed(1)}%</span>
                     </div>
                   </td>
-                  <td>
-                    <span className={`status-pill ${getUsageTone(server.usage_percent) === 'danger' ? 'danger' : getUsageTone(server.usage_percent) === 'warning' ? 'warning' : 'online'}`}>
-                      {getUsageTone(server.usage_percent) === 'danger'
-                        ? '高风险'
-                        : getUsageTone(server.usage_percent) === 'warning'
-                          ? '关注'
-                          : '稳定'}
-                    </span>
-                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {!data.servers.length && <div className='empty-state padded'>/overview 暂时还没有返回明细行。</div>}
+          {!servers.length && <div className='empty-state padded'>当前还没有返回服务列表数据。</div>}
         </div>
       </section>
     </div>

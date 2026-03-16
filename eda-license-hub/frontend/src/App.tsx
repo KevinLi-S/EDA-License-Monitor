@@ -4,6 +4,8 @@ import Dashboard from './pages/Dashboard'
 import Servers from './pages/Servers'
 import Alerts from './pages/Alerts'
 import Analytics from './pages/Analytics'
+import LicenseKeys from './pages/LicenseKeys'
+import LicenseUsage from './pages/LicenseUsage'
 
 export default function App() {
   return (
@@ -13,6 +15,8 @@ export default function App() {
           <Route index element={<Navigate to='/dashboard' replace />} />
           <Route path='dashboard' element={<Dashboard />} />
           <Route path='servers' element={<Servers />} />
+          <Route path='license-keys' element={<LicenseKeys />} />
+          <Route path='license-usage' element={<LicenseUsage />} />
           <Route path='alerts' element={<Alerts />} />
           <Route path='analytics' element={<Analytics />} />
         </Route>

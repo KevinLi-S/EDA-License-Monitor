@@ -4,8 +4,15 @@ const sections = [
   {
     title: 'Monitoring',
     items: [
-      { path: '/dashboard', label: 'Dashboard', icon: '▣', description: 'Overview, trends, and server posture' },
-      { path: '/analytics', label: 'Analytics', icon: '◔', description: 'Capacity outlook and trend modules' },
+      { path: '/dashboard', label: 'Dashboard', icon: '▣', description: 'Vendor overview and service posture' },
+      { path: '/analytics', label: 'Analytics', icon: '◔', description: 'Trend, distribution, and ranking charts' },
+    ],
+  },
+  {
+    title: 'License',
+    items: [
+      { path: '/license-keys', label: 'License Keys', icon: '⌘', description: 'Key catalog and issued capacity' },
+      { path: '/license-usage', label: 'License Usage', icon: '◎', description: 'Active user and hostname usage' },
     ],
   },
   {
@@ -67,7 +74,7 @@ export default function Layout() {
           <p className='nav-section-title'>Workspace note</p>
           <strong>接口保持不变</strong>
           <span>
-            Dashboard 与 Servers 仍沿用 phase-2 原有接口路径，仅更新展示层样式与布局。
+            当前新增页面基于现有 phase-2 数据模型扩展，不改变既有 Servers / Dashboard / Analytics 主流程。
           </span>
         </div>
       </aside>
