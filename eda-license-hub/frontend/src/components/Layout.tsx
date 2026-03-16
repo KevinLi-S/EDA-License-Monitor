@@ -1,45 +1,82 @@
 import { Link, Outlet, useLocation } from 'react-router-dom'
 
-const items = [
-  { path: '/dashboard', label: 'Control Center', description: 'KPIs, fleet health, today summary' },
-  { path: '/servers', label: 'Server Fleet', description: 'Collector refresh and endpoint status' },
-  { path: '/alerts', label: 'Alerts', description: 'Risk feed and escalation queue' },
-  { path: '/analytics', label: 'Analytics', description: 'Utilization patterns and capacity' },
+const sections = [
+  {
+    title: 'Monitoring',
+    items: [
+      { path: '/dashboard', label: 'Dashboard', icon: '▣', description: 'Overview, trends, and server posture' },
+      { path: '/analytics', label: 'Analytics', icon: '◔', description: 'Capacity outlook and trend modules' },
+    ],
+  },
+  {
+    title: 'Operations',
+    items: [
+      { path: '/servers', label: 'Servers', icon: '◫', description: 'Collector endpoints and refresh control' },
+      { path: '/alerts', label: 'Alerts', icon: '△', description: 'Escalations and response workflow' },
+    ],
+  },
 ]
+
+const flatItems = sections.flatMap((section) => section.items)
 
 export default function Layout() {
   const location = useLocation()
-  const activeItem = items.find((item) => location.pathname.startsWith(item.path)) ?? items[0]
+  const activeItem = flatItems.find((item) => location.pathname.startsWith(item.path)) ?? flatItems[0]
 
   return (
     <div className='app-shell'>
       <aside className='sidebar'>
-        <div>
+        <div className='sidebar-header'>
           <div className='brand-mark'>EL</div>
-          <div className='brand-title'>EDA License Hub</div>
-          <div className='brand-subtitle'>Phase-2 operations cockpit</div>
+          <div>
+            <h1 className='brand-title'>EDA License Hub</h1>
+            <p className='brand-subtitle'>Light operations dashboard</p>
+          </div>
         </div>
 
-        <nav className='nav-list'>
-          {items.map((item) => {
-            const active = location.pathname === item.path
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={`nav-item${active ? ' active' : ''}`}
-              >
-                <span>{item.label}</span>
-                <small>{item.description}</small>
-              </Link>
-            )
-          })}
+        <div className='sidebar-status'>
+          <span className='status-dot' />
+          <div>
+            <strong>System healthy</strong>
+            <span>Phase-2 frontend shell on live route entry</span>
+          </div>
+        </div>
+
+        <nav className='sidebar-nav'>
+          {sections.map((section) => (
+            <div key={section.title} className='nav-section'>
+              <p className='nav-section-title'>{section.title}</p>
+              <div className='nav-group'>
+                {section.items.map((item) => {
+                  const active = location.pathname === item.path
+                  return (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      className={`nav-item${active ? ' active' : ''}`}
+                    >
+                      <div className='nav-item-main'>
+                        <span className='nav-icon'>{item.icon}</span>
+                        <div>
+                          <span className='nav-label'>{item.label}</span>
+                          <small>{item.description}</small>
+                        </div>
+                      </div>
+                      {active && <span className='nav-badge'>Live</span>}
+                    </Link>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
         <div className='sidebar-panel'>
-          <p className='eyebrow'>Live posture</p>
-          <strong>Collector loop online</strong>
-          <span>Keep this screen open for demos, standups, and lightweight ops review.</span>
+          <p className='nav-section-title'>Workspace note</p>
+          <strong>API contract unchanged</strong>
+          <span>
+            Dashboard and server views keep the same phase-2 fetch paths while adopting the new admin-style UI.
+          </span>
         </div>
       </aside>
 
@@ -47,16 +84,17 @@ export default function Layout() {
         <header className='topbar'>
           <div>
             <p className='eyebrow'>Monitoring workspace</p>
-            <h1>{activeItem.label}</h1>
+            <h2>{activeItem.label}</h2>
             <p className='topbar-copy'>{activeItem.description}</p>
           </div>
-          <div className='topbar-badges'>
-            <span className='status-pill online'>Phase 2 Demo</span>
-            <span className='status-pill'>API contract preserved</span>
+          <div className='topbar-actions'>
+            <button type='button' className='header-button secondary'>Export</button>
+            <button type='button' className='header-button secondary'>Share</button>
+            <button type='button' className='header-button primary'>Refresh View</button>
           </div>
         </header>
 
-        <section className='content-card'>
+        <section className='content-shell'>
           <Outlet />
         </section>
       </main>

@@ -5,7 +5,7 @@ const chartCards = [
   },
   {
     title: 'Feature demand mix',
-    caption: 'Pie / stacked-bar treatment can land later without restructuring the shell.',
+    caption: 'Pie or stacked-bar treatment can land later without restructuring the shell.',
   },
   {
     title: 'Capacity forecast',
@@ -16,13 +16,16 @@ const chartCards = [
 export default function Analytics() {
   return (
     <div className='page-stack'>
-      <section className='section-header'>
+      <section className='section-header-card'>
         <div>
           <p className='eyebrow'>Analytics workspace</p>
-          <h2>Capacity narrative and trend placeholders</h2>
-          <p>The backend can grow richer reporting later; for now this page frames the story cleanly for stakeholders.</p>
+          <h3>Capacity narrative and trend modules</h3>
+          <p>Follows the same light admin dashboard treatment while staying honest about current phase-2 scope.</p>
         </div>
-        <span className='status-pill'>Phase-3 ready</span>
+        <div className='header-chip-row'>
+          <span className='status-pill'>Phase-3 ready</span>
+          <span className='status-pill online'>Shell aligned</span>
+        </div>
       </section>
 
       <section className='dashboard-grid secondary'>
@@ -42,7 +45,7 @@ export default function Analytics() {
         ))}
       </section>
 
-      <section className='panel'>
+      <section className='panel table-panel'>
         <div className='panel-header'>
           <div>
             <p className='eyebrow'>Narrative helpers</p>

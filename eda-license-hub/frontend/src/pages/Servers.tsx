@@ -12,6 +12,12 @@ type Server = {
   usage_percent: number
 }
 
+function getUsageTone(usagePercent: number) {
+  if (usagePercent >= 90) return 'danger'
+  if (usagePercent >= 75) return 'warning'
+  return 'ok'
+}
+
 export default function Servers() {
   const [servers, setServers] = useState<Server[]>([])
   const [refreshing, setRefreshing] = useState(false)
@@ -44,40 +50,43 @@ export default function Servers() {
 
   return (
     <div className='page-stack'>
-      <section className='section-header'>
+      <section className='section-header-card'>
         <div>
           <p className='eyebrow'>Infrastructure inventory</p>
-          <h2>Server fleet</h2>
-          <p>Run the collector, inspect endpoints, and walk through license-capacity hotspots in one table.</p>
+          <h3>Server fleet and collector control</h3>
+          <p>White-card operations view for endpoint status, collector refresh, and current capacity pressure.</p>
         </div>
-        <button className='primary-button' onClick={refresh} disabled={refreshing}>
-          {refreshing ? 'Refreshing…' : 'Run Collector'}
-        </button>
+        <div className='topbar-actions'>
+          <button type='button' className='header-button secondary'>Upload Config</button>
+          <button type='button' className='header-button primary' onClick={refresh} disabled={refreshing}>
+            {refreshing ? 'Refreshing…' : 'Run Collector'}
+          </button>
+        </div>
       </section>
 
       <section className='kpi-grid compact'>
-        <article className='kpi-card'>
+        <article className='metric-card'>
           <p>Online servers</p>
           <h3>{summary.online}</h3>
           <span>of {servers.length || 0} registered endpoints</span>
         </article>
-        <article className='kpi-card'>
+        <article className='metric-card'>
           <p>High pressure nodes</p>
           <h3>{summary.highUsage}</h3>
           <span>≥ 80% peak utilization</span>
         </article>
-        <article className='kpi-card'>
+        <article className='metric-card'>
           <p>Average feature count</p>
           <h3>{summary.avgFeatures.toFixed(1)}</h3>
           <span>tracked features per server</span>
         </article>
       </section>
 
-      <section className='panel'>
+      <section className='panel table-panel'>
         <div className='panel-header'>
           <div>
-            <p className='eyebrow'>Operational table</p>
-            <h3>Collector endpoints</h3>
+            <p className='eyebrow'>Collector endpoints</p>
+            <h3>Server detail table</h3>
           </div>
           <span className='status-pill'>{servers.length} rows</span>
         </div>
@@ -115,7 +124,7 @@ export default function Servers() {
                   <td>
                     <div className='usage-cell'>
                       <div className='bar-track slim'>
-                        <div className='bar-fill' style={{ width: `${Math.min(server.usage_percent, 100)}%` }} />
+                        <div className={`bar-fill ${getUsageTone(server.usage_percent)}`} style={{ width: `${Math.min(server.usage_percent, 100)}%` }} />
                       </div>
                       <span>{server.usage_percent.toFixed(1)}%</span>
                     </div>
