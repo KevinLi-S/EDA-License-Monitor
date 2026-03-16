@@ -22,6 +22,20 @@ function getUsageTone(usagePercent: number) {
   return 'ok'
 }
 
+function buildMiniChartPath(points: number[], width: number, height: number) {
+  if (!points.length) return ''
+  const max = Math.max(...points, 1)
+  const min = Math.min(...points, 0)
+  const range = Math.max(max - min, 1)
+  return points
+    .map((point, index) => {
+      const x = points.length === 1 ? width / 2 : (index / (points.length - 1)) * width
+      const y = height - ((point - min) / range) * height
+      return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`
+    })
+    .join(' ')
+}
+
 export default function Dashboard() {
   const [data, setData] = useState<Overview>({ kpis: [], servers: [], alerts: [] })
   const [loading, setLoading] = useState(true)
@@ -35,7 +49,7 @@ export default function Dashboard() {
   }, [])
 
   const computed = useMemo(() => {
-    const onlineServers = data.servers.filter((server) => server.status.toLowerCase() === 'online').length
+    const onlineServers = data.servers.filter((server) => ['online', 'up'].includes(server.status.toLowerCase())).length
     const avgUsage = data.servers.length
       ? data.servers.reduce((sum, server) => sum + server.usage_percent, 0) / data.servers.length
       : 0
@@ -43,12 +57,14 @@ export default function Dashboard() {
       (a, b) => (severityRank[b.severity.toLowerCase()] ?? 0) - (severityRank[a.severity.toLowerCase()] ?? 0),
     )[0]
     const highestUsage = [...data.servers].sort((a, b) => b.usage_percent - a.usage_percent).slice(0, 6)
+    const miniSeries = data.servers.map((server) => server.usage_percent)
 
     return {
       onlineServers,
       avgUsage,
       topAlert,
       highestUsage,
+      miniChartPath: buildMiniChartPath(miniSeries, 280, 88),
     }
   }, [data])
 
@@ -78,14 +94,23 @@ export default function Dashboard() {
               <p className='eyebrow'>趋势区域</p>
               <h3>使用趋势快照</h3>
             </div>
-            <span className='status-pill'>近 24 小时</span>
+            <span className='status-pill'>实时概览</span>
           </div>
-          <div className='trend-chart'>
-            <div className='trend-fill' />
-            <div className='trend-grid' />
+          <div className='trend-chart real'>
+            <svg viewBox='0 0 320 160' className='dashboard-mini-chart'>
+              <g transform='translate(16,18)'>
+                <line x1='0' y1='30' x2='280' y2='30' className='chart-threshold-line warning' />
+                <line x1='0' y1='14' x2='280' y2='14' className='chart-threshold-line danger' />
+                <path d={computed.miniChartPath} className='chart-line' />
+              </g>
+            </svg>
             <div className='trend-legend'>
               <strong>{computed.avgUsage.toFixed(1)}%</strong>
-              <span>全局平均使用率</span>
+              <span>当前服务器平均峰值使用率</span>
+            </div>
+            <div className='threshold-legend compact'>
+              <span><i className='threshold-dot warning' /> 75% 关注</span>
+              <span><i className='threshold-dot danger' /> 90% 高风险</span>
             </div>
           </div>
         </article>
@@ -101,13 +126,13 @@ export default function Dashboard() {
             {data.servers.map((server) => (
               <div key={server.id} className='status-item'>
                 <div className='status-item-main'>
-                  <span className={`status-indicator ${server.status.toLowerCase() === 'online' ? 'ok' : 'down'}`} />
+                  <span className={`status-indicator ${['online', 'up'].includes(server.status.toLowerCase()) ? 'ok' : 'down'}`} />
                   <div>
                     <strong>{server.name}</strong>
                     <span>{server.vendor}</span>
                   </div>
                 </div>
-                <span className={`status-pill ${server.status.toLowerCase() === 'online' ? 'online' : 'warning'}`}>
+                <span className={`status-pill ${['online', 'up'].includes(server.status.toLowerCase()) ? 'online' : 'warning'}`}>
                   {server.status}
                 </span>
               </div>
@@ -183,7 +208,7 @@ export default function Dashboard() {
                   </td>
                   <td>{server.vendor}</td>
                   <td>
-                    <span className={`status-pill ${server.status.toLowerCase() === 'online' ? 'online' : 'warning'}`}>
+                    <span className={`status-pill ${['online', 'up'].includes(server.status.toLowerCase()) ? 'online' : 'warning'}`}>
                       {server.status}
                     </span>
                   </td>

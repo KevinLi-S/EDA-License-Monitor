@@ -103,7 +103,6 @@ a {
   color: #91a4b8;
 }
 
-.sidebar-status,
 .sidebar-panel {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -111,13 +110,6 @@ a {
   padding: 14px;
 }
 
-.sidebar-status {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-}
-
-.status-dot,
 .status-indicator {
   width: 10px;
   height: 10px;
@@ -125,7 +117,6 @@ a {
   flex: none;
 }
 
-.status-dot,
 .status-indicator.ok {
   background: #2ecc71;
 }
@@ -371,6 +362,17 @@ a {
   clip-path: polygon(0% 82%, 8% 70%, 18% 74%, 28% 52%, 38% 56%, 48% 44%, 58% 49%, 68% 36%, 78% 42%, 88% 28%, 100% 34%, 100% 100%, 0% 100%);
 }
 
+.trend-chart.real {
+  display: grid;
+  align-content: space-between;
+  padding: 16px;
+}
+
+.dashboard-mini-chart {
+  width: 100%;
+  height: auto;
+}
+
 .trend-legend {
   position: absolute;
   left: 20px;
@@ -570,6 +572,52 @@ a {
   gap: 12px;
 }
 
+.chart-tooltip-wrap {
+  position: relative;
+}
+
+.chart-tooltip {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  background: rgba(44, 62, 80, 0.96);
+  color: #fff;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  display: grid;
+  gap: 2px;
+  pointer-events: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.threshold-legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: #6b7c93;
+}
+
+.threshold-legend.compact {
+  margin-top: 8px;
+}
+
+.threshold-dot {
+  width: 10px;
+  height: 10px;
+  display: inline-block;
+  border-radius: 999px;
+  margin-right: 6px;
+}
+
+.threshold-dot.warning {
+  background: #f39c12;
+}
+
+.threshold-dot.danger {
+  background: #e74c3c;
+}
+
 .svg-chart {
   width: 100%;
   height: auto;
@@ -582,6 +630,19 @@ a {
 .chart-grid-line {
   stroke: #dbe4ec;
   stroke-width: 1;
+}
+
+.chart-threshold-line {
+  stroke-width: 2;
+  stroke-dasharray: 6 6;
+}
+
+.chart-threshold-line.warning {
+  stroke: #f39c12;
+}
+
+.chart-threshold-line.danger {
+  stroke: #e74c3c;
 }
 
 .chart-area {

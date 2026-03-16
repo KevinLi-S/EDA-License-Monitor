@@ -17,6 +17,13 @@ type Server = {
   usage_percent: number
 }
 
+type TooltipState = {
+  x: number
+  y: number
+  label: string
+  value: string
+} | null
+
 function formatTimeLabel(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
@@ -72,6 +79,7 @@ export default function Analytics() {
   const [trend, setTrend] = useState<TrendPoint[]>([])
   const [servers, setServers] = useState<Server[]>([])
   const [loading, setLoading] = useState(true)
+  const [tooltip, setTooltip] = useState<TooltipState>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -87,16 +95,33 @@ export default function Analytics() {
       .finally(() => setLoading(false))
   }, [])
 
-  const trendChart = useMemo(() => {
+  const trendStats = useMemo(() => {
     const values = trend.map((item) => item.usage_percent)
+    const max = values.length ? Math.max(...values) : 0
+    const min = values.length ? Math.min(...values) : 0
     return {
-      linePath: buildLinePath(values, 520, 180),
-      areaPath: buildAreaPath(values, 520, 180),
-      max: values.length ? Math.max(...values) : 0,
+      values,
+      max,
+      min,
       avg: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0,
       latest: values.length ? values[values.length - 1] : 0,
+      linePath: buildLinePath(values, 520, 180),
+      areaPath: buildAreaPath(values, 520, 180),
     }
   }, [trend])
+
+  const trendPoints = useMemo(() => {
+    const range = Math.max(trendStats.max - trendStats.min, 1)
+    return trend.map((point, index) => {
+      const x = trend.length === 1 ? 260 : (index / (trend.length - 1)) * 520
+      const y = 180 - ((point.usage_percent - trendStats.min) / range) * 180
+      return {
+        ...point,
+        x,
+        y,
+      }
+    })
+  }, [trend, trendStats.max, trendStats.min])
 
   const vendorMix = useMemo(() => {
     const grouped = servers.reduce<Record<string, { count: number; peak: number }>>((acc, server) => {
@@ -148,17 +173,17 @@ export default function Analytics() {
       <section className='kpi-grid compact'>
         <article className='metric-card'>
           <p>最新平均使用率</p>
-          <h3>{trendChart.latest.toFixed(1)}%</h3>
+          <h3>{trendStats.latest.toFixed(1)}%</h3>
           <span>来自 usage-trend 最后一个采样点</span>
         </article>
         <article className='metric-card'>
           <p>趋势均值</p>
-          <h3>{trendChart.avg.toFixed(1)}%</h3>
+          <h3>{trendStats.avg.toFixed(1)}%</h3>
           <span>基于当前返回的全部趋势点</span>
         </article>
         <article className='metric-card'>
           <p>峰值记录</p>
-          <h3>{trendChart.max.toFixed(1)}%</h3>
+          <h3>{trendStats.max.toFixed(1)}%</h3>
           <span>趋势序列中的最高平均使用率</span>
         </article>
       </section>
@@ -174,30 +199,52 @@ export default function Analytics() {
           </div>
           {trend.length ? (
             <div className='svg-chart-card'>
-              <svg viewBox='0 0 560 240' className='svg-chart'>
-                <g transform='translate(20,20)'>
-                  {[0, 1, 2, 3, 4].map((line) => (
-                    <line
-                      key={line}
-                      x1='0'
-                      y1={line * 45}
-                      x2='520'
-                      y2={line * 45}
-                      className='chart-grid-line'
-                    />
-                  ))}
-                  <path d={trendChart.areaPath} className='chart-area' />
-                  <path d={trendChart.linePath} className='chart-line' />
-                  {trend.map((point, index) => {
-                    const x = trend.length === 1 ? 260 : (index / (trend.length - 1)) * 520
-                    const max = Math.max(...trend.map((item) => item.usage_percent), 1)
-                    const min = Math.min(...trend.map((item) => item.usage_percent), 0)
-                    const range = Math.max(max - min, 1)
-                    const y = 180 - ((point.usage_percent - min) / range) * 180
-                    return <circle key={`${point.timestamp}-${index}`} cx={x} cy={y} r='4' className='chart-point' />
-                  })}
-                </g>
-              </svg>
+              <div className='chart-tooltip-wrap'>
+                {tooltip && (
+                  <div className='chart-tooltip' style={{ left: tooltip.x, top: tooltip.y }}>
+                    <strong>{tooltip.label}</strong>
+                    <span>{tooltip.value}</span>
+                  </div>
+                )}
+                <svg viewBox='0 0 560 240' className='svg-chart'>
+                  <g transform='translate(20,20)'>
+                    {[0, 1, 2, 3, 4].map((line) => (
+                      <line
+                        key={line}
+                        x1='0'
+                        y1={line * 45}
+                        x2='520'
+                        y2={line * 45}
+                        className='chart-grid-line'
+                      />
+                    ))}
+                    <line x1='0' y1='45' x2='520' y2='45' className='chart-threshold-line warning' />
+                    <line x1='0' y1='18' x2='520' y2='18' className='chart-threshold-line danger' />
+                    <path d={trendStats.areaPath} className='chart-area' />
+                    <path d={trendStats.linePath} className='chart-line' />
+                    {trendPoints.map((point, index) => (
+                      <circle
+                        key={`${point.timestamp}-${index}`}
+                        cx={point.x}
+                        cy={point.y}
+                        r='5'
+                        className='chart-point'
+                        onMouseEnter={() => setTooltip({
+                          x: point.x + 32,
+                          y: point.y + 6,
+                          label: formatTimeLabel(point.timestamp),
+                          value: `${point.usage_percent.toFixed(1)}%`,
+                        })}
+                        onMouseLeave={() => setTooltip(null)}
+                      />
+                    ))}
+                  </g>
+                </svg>
+              </div>
+              <div className='threshold-legend'>
+                <span><i className='threshold-dot warning' /> 75% 关注线</span>
+                <span><i className='threshold-dot danger' /> 90% 高风险线</span>
+              </div>
               <div className='chart-axis-labels'>
                 {trend.map((point) => (
                   <span key={point.timestamp}>{formatTimeLabel(point.timestamp)}</span>

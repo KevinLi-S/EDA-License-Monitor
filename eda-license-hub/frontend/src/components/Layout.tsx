@@ -29,16 +29,8 @@ export default function Layout() {
         <div className='sidebar-header'>
           <div className='brand-mark'>EL</div>
           <div>
-            <h1 className='brand-title'>EDA License Hub</h1>
+            <h1 className='brand-title'>EDA License Monitor</h1>
             <p className='brand-subtitle'>轻量运维看板</p>
-          </div>
-        </div>
-
-        <div className='sidebar-status'>
-          <span className='status-dot' />
-          <div>
-            <strong>系统运行正常</strong>
-            <span>当前为 phase-2 实际运行入口页面</span>
           </div>
         </div>
 
