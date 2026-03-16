@@ -1,22 +1,25 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.db import Base, SessionLocal, engine
-from app.routers.api import router as api_router
-from app.seed import seed_if_empty
+from app.api.router import api_router
+from app.api.websocket import router as websocket_router
+from app.config import settings
 
-app = FastAPI(title="EDA License Hub API", version="0.1.0")
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+
+
+app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-Base.metadata.create_all(bind=engine)
-with SessionLocal() as db:
-    seed_if_empty(db)
-
-app.include_router(api_router)
+app.include_router(api_router, prefix=settings.api_v1_prefix)
+app.include_router(websocket_router)
