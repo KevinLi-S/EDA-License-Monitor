@@ -52,54 +52,54 @@ export default function Servers() {
     <div className='page-stack'>
       <section className='section-header-card'>
         <div>
-          <p className='eyebrow'>Infrastructure inventory</p>
-          <h3>Server fleet and collector control</h3>
-          <p>White-card operations view for endpoint status, collector refresh, and current capacity pressure.</p>
+          <p className='eyebrow'>基础设施清单</p>
+          <h3>服务器列表与采集控制</h3>
+          <p>以白卡片后台视图展示端点状态、采集刷新能力以及当前容量压力。</p>
         </div>
         <div className='topbar-actions'>
-          <button type='button' className='header-button secondary'>Upload Config</button>
+          <button type='button' className='header-button secondary'>上传配置</button>
           <button type='button' className='header-button primary' onClick={refresh} disabled={refreshing}>
-            {refreshing ? 'Refreshing…' : 'Run Collector'}
+            {refreshing ? '刷新中…' : '运行采集'}
           </button>
         </div>
       </section>
 
       <section className='kpi-grid compact'>
         <article className='metric-card'>
-          <p>Online servers</p>
+          <p>在线服务器</p>
           <h3>{summary.online}</h3>
-          <span>of {servers.length || 0} registered endpoints</span>
+          <span>共 {servers.length || 0} 个已登记端点</span>
         </article>
         <article className='metric-card'>
-          <p>High pressure nodes</p>
+          <p>高压力节点</p>
           <h3>{summary.highUsage}</h3>
-          <span>≥ 80% peak utilization</span>
+          <span>峰值使用率 ≥ 80%</span>
         </article>
         <article className='metric-card'>
-          <p>Average feature count</p>
+          <p>平均特征数</p>
           <h3>{summary.avgFeatures.toFixed(1)}</h3>
-          <span>tracked features per server</span>
+          <span>每台服务器跟踪的 feature 数</span>
         </article>
       </section>
 
       <section className='panel table-panel'>
         <div className='panel-header'>
           <div>
-            <p className='eyebrow'>Collector endpoints</p>
-            <h3>Server detail table</h3>
+            <p className='eyebrow'>采集端点</p>
+            <h3>服务器明细表</h3>
           </div>
-          <span className='status-pill'>{servers.length} rows</span>
+          <span className='status-pill'>{servers.length} 行</span>
         </div>
         <div className='table-wrap'>
           <table className='data-table'>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Vendor</th>
-                <th>Endpoint</th>
-                <th>Status</th>
+                <th>名称</th>
+                <th>厂商</th>
+                <th>端点</th>
+                <th>状态</th>
                 <th>Features</th>
-                <th>Peak usage</th>
+                <th>峰值使用率</th>
               </tr>
             </thead>
             <tbody>
@@ -108,7 +108,7 @@ export default function Servers() {
                   <td>
                     <div className='table-primary'>
                       <strong>{server.name}</strong>
-                      <span>Server #{server.id}</span>
+                      <span>服务器 #{server.id}</span>
                     </div>
                   </td>
                   <td>{server.vendor}</td>
@@ -133,7 +133,7 @@ export default function Servers() {
               ))}
             </tbody>
           </table>
-          {!servers.length && <div className='empty-state padded'>No server rows returned from /servers yet.</div>}
+          {!servers.length && <div className='empty-state padded'>/servers 暂时还没有返回服务器数据。</div>}
         </div>
       </section>
     </div>

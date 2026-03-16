@@ -18,13 +18,13 @@ export default function Analytics() {
     <div className='page-stack'>
       <section className='section-header-card'>
         <div>
-          <p className='eyebrow'>Analytics workspace</p>
-          <h3>Capacity narrative and trend modules</h3>
-          <p>Follows the same light admin dashboard treatment while staying honest about current phase-2 scope.</p>
+          <p className='eyebrow'>分析工作区</p>
+          <h3>容量趋势与叙事模块</h3>
+          <p>沿用同一套浅色后台风格，同时如实表达当前 phase-2 的能力边界。</p>
         </div>
         <div className='header-chip-row'>
-          <span className='status-pill'>Phase-3 ready</span>
-          <span className='status-pill online'>Shell aligned</span>
+          <span className='status-pill'>可扩展到 Phase-3</span>
+          <span className='status-pill online'>界面已对齐</span>
         </div>
       </section>
 
@@ -48,14 +48,14 @@ export default function Analytics() {
       <section className='panel table-panel'>
         <div className='panel-header'>
           <div>
-            <p className='eyebrow'>Narrative helpers</p>
-            <h3>What this page should eventually answer</h3>
+            <p className='eyebrow'>分析目标</p>
+            <h3>这个页面未来应回答的问题</h3>
           </div>
         </div>
         <ul className='bullet-list'>
-          <li>Which vendors are trending toward capacity risk?</li>
-          <li>Which feature pools justify procurement or cleanup action first?</li>
-          <li>How does collector freshness affect trust in the dashboard snapshot?</li>
+          <li>哪些厂商正在逐步接近容量风险？</li>
+          <li>哪些 feature 池最值得优先采购或清理？</li>
+          <li>采集新鲜度会如何影响大家对当前总览数据的信任度？</li>
         </ul>
       </section>
     </div>

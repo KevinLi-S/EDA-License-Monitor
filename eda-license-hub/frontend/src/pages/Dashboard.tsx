@@ -56,18 +56,17 @@ export default function Dashboard() {
     <div className='page-stack'>
       <section className='section-header-card'>
         <div>
-          <p className='eyebrow'>Control center</p>
-          <h3>License operations overview</h3>
+          <p className='eyebrow'>控制中心</p>
+          <h3>许可证运行总览</h3>
           <p>
-            Styled after the reference admin layout: light shell, grouped cards, status summary, usage focus.
-            Existing phase-2 API responses remain untouched.
+            参考 layout-B 的后台布局风格，重点展示运行状态、容量压力与风险概览；底层仍沿用现有 phase-2 接口。
           </p>
         </div>
         <div className='header-chip-row'>
-          <span className='status-pill online'>{computed.onlineServers}/{data.servers.length || 0} online</span>
-          <span className='status-pill'>{computed.avgUsage.toFixed(1)}% avg peak</span>
+          <span className='status-pill online'>{computed.onlineServers}/{data.servers.length || 0} 台在线</span>
+          <span className='status-pill'>平均峰值 {computed.avgUsage.toFixed(1)}%</span>
           <span className={`status-pill ${computed.topAlert ? 'danger' : 'online'}`}>
-            {computed.topAlert ? computed.topAlert.severity.toUpperCase() : 'No active alerts'}
+            {computed.topAlert ? `最高告警 ${computed.topAlert.severity.toUpperCase()}` : '当前无活动告警'}
           </span>
         </div>
       </section>
@@ -76,17 +75,17 @@ export default function Dashboard() {
         <article className='panel trend-panel'>
           <div className='panel-header'>
             <div>
-              <p className='eyebrow'>Trend area</p>
-              <h3>Usage trend snapshot</h3>
+              <p className='eyebrow'>趋势区域</p>
+              <h3>使用趋势快照</h3>
             </div>
-            <span className='status-pill'>24h view</span>
+            <span className='status-pill'>近 24 小时</span>
           </div>
           <div className='trend-chart'>
             <div className='trend-fill' />
             <div className='trend-grid' />
             <div className='trend-legend'>
               <strong>{computed.avgUsage.toFixed(1)}%</strong>
-              <span>Average fleet usage</span>
+              <span>全局平均使用率</span>
             </div>
           </div>
         </article>
@@ -94,8 +93,8 @@ export default function Dashboard() {
         <article className='panel'>
           <div className='panel-header'>
             <div>
-              <p className='eyebrow'>Status</p>
-              <h3>Server posture</h3>
+              <p className='eyebrow'>状态面板</p>
+              <h3>服务器姿态</h3>
             </div>
           </div>
           <div className='status-list'>
@@ -113,7 +112,7 @@ export default function Dashboard() {
                 </span>
               </div>
             ))}
-            {!data.servers.length && <div className='empty-state'>No servers returned from /overview yet.</div>}
+            {!data.servers.length && <div className='empty-state'>/overview 暂时还没有返回服务器数据。</div>}
           </div>
         </article>
       </section>
@@ -128,9 +127,9 @@ export default function Dashboard() {
         ))}
         {data.kpis.length === 0 && (
           <article className='metric-card muted'>
-            <p>Overview feed</p>
-            <h3>{loading ? 'Loading…' : 'No data'}</h3>
-            <span>Waiting for /overview response</span>
+            <p>总览数据流</p>
+            <h3>{loading ? '加载中…' : '暂无数据'}</h3>
+            <span>等待 /overview 返回结果</span>
           </article>
         )}
       </section>
@@ -151,26 +150,26 @@ export default function Dashboard() {
             </article>
           )
         })}
-        {!computed.highestUsage.length && <div className='empty-state'>Usage cards will appear once server data is available.</div>}
+        {!computed.highestUsage.length && <div className='empty-state'>有服务器数据后，这里会显示高使用率卡片。</div>}
       </section>
 
       <section className='panel table-panel'>
         <div className='panel-header'>
           <div>
-            <p className='eyebrow'>Operations table</p>
-            <h3>Server usage detail</h3>
+            <p className='eyebrow'>运行明细</p>
+            <h3>服务器使用详情</h3>
           </div>
-          <span className='status-pill'>{data.servers.length} rows</span>
+          <span className='status-pill'>{data.servers.length} 行</span>
         </div>
         <div className='table-wrap'>
           <table className='data-table'>
             <thead>
               <tr>
-                <th>Server</th>
-                <th>Vendor</th>
-                <th>Status</th>
-                <th>Peak usage</th>
-                <th>Risk</th>
+                <th>服务器</th>
+                <th>厂商</th>
+                <th>状态</th>
+                <th>峰值使用率</th>
+                <th>风险</th>
               </tr>
             </thead>
             <tbody>
@@ -179,7 +178,7 @@ export default function Dashboard() {
                   <td>
                     <div className='table-primary'>
                       <strong>{server.name}</strong>
-                      <span>Server #{server.id}</span>
+                      <span>服务器 #{server.id}</span>
                     </div>
                   </td>
                   <td>{server.vendor}</td>
@@ -199,17 +198,17 @@ export default function Dashboard() {
                   <td>
                     <span className={`status-pill ${getUsageTone(server.usage_percent) === 'danger' ? 'danger' : getUsageTone(server.usage_percent) === 'warning' ? 'warning' : 'online'}`}>
                       {getUsageTone(server.usage_percent) === 'danger'
-                        ? 'High'
+                        ? '高风险'
                         : getUsageTone(server.usage_percent) === 'warning'
-                          ? 'Watch'
-                          : 'Stable'}
+                          ? '关注'
+                          : '稳定'}
                     </span>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {!data.servers.length && <div className='empty-state padded'>No server rows returned from /overview yet.</div>}
+          {!data.servers.length && <div className='empty-state padded'>/overview 暂时还没有返回明细行。</div>}
         </div>
       </section>
     </div>

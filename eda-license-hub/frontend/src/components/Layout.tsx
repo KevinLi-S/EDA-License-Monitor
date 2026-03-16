@@ -30,15 +30,15 @@ export default function Layout() {
           <div className='brand-mark'>EL</div>
           <div>
             <h1 className='brand-title'>EDA License Hub</h1>
-            <p className='brand-subtitle'>Light operations dashboard</p>
+            <p className='brand-subtitle'>轻量运维看板</p>
           </div>
         </div>
 
         <div className='sidebar-status'>
           <span className='status-dot' />
           <div>
-            <strong>System healthy</strong>
-            <span>Phase-2 frontend shell on live route entry</span>
+            <strong>系统运行正常</strong>
+            <span>当前为 phase-2 实际运行入口页面</span>
           </div>
         </div>
 
@@ -73,9 +73,9 @@ export default function Layout() {
 
         <div className='sidebar-panel'>
           <p className='nav-section-title'>Workspace note</p>
-          <strong>API contract unchanged</strong>
+          <strong>接口保持不变</strong>
           <span>
-            Dashboard and server views keep the same phase-2 fetch paths while adopting the new admin-style UI.
+            Dashboard 与 Servers 仍沿用 phase-2 原有接口路径，仅更新展示层样式与布局。
           </span>
         </div>
       </aside>
@@ -83,14 +83,14 @@ export default function Layout() {
       <main className='main-panel'>
         <header className='topbar'>
           <div>
-            <p className='eyebrow'>Monitoring workspace</p>
+            <p className='eyebrow'>监控工作台</p>
             <h2>{activeItem.label}</h2>
             <p className='topbar-copy'>{activeItem.description}</p>
           </div>
           <div className='topbar-actions'>
-            <button type='button' className='header-button secondary'>Export</button>
-            <button type='button' className='header-button secondary'>Share</button>
-            <button type='button' className='header-button primary'>Refresh View</button>
+            <button type='button' className='header-button secondary'>导出</button>
+            <button type='button' className='header-button secondary'>分享</button>
+            <button type='button' className='header-button primary'>刷新视图</button>
           </div>
         </header>
 
