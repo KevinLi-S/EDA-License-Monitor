@@ -18,13 +18,30 @@ function formatDateTime(value: string) {
   return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
 }
 
+function toApiDateTime(value: string) {
+  if (!value) return ''
+  return `${value}:00`
+}
+
 export default function LicenseUsage() {
   const [items, setItems] = useState<LicenseUsageRow[]>([])
   const [query, setQuery] = useState('')
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    apiGet<LicenseUsageRow[]>('/licenses/usage').then(setItems).catch(console.error)
-  }, [])
+    const params = new URLSearchParams()
+    if (startTime) params.set('start_time', toApiDateTime(startTime))
+    if (endTime) params.set('end_time', toApiDateTime(endTime))
+    const queryString = params.toString()
+
+    setLoading(true)
+    apiGet<LicenseUsageRow[]>(`/licenses/usage${queryString ? `?${queryString}` : ''}`)
+      .then(setItems)
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [startTime, endTime])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -40,14 +57,35 @@ export default function LicenseUsage() {
         <div>
           <p className='eyebrow'>使用页面</p>
           <h3>License Usage</h3>
-          <p>只展示当前有使用中的 license，按活跃 checkout 展示用户、客户端主机以及最后使用时间。</p>
+          <p>只展示当前有使用中的 license，支持按时间范围筛选活跃 checkout 记录。</p>
         </div>
-        <div className='search-strip'>
+        <div className='search-strip stacked-filters'>
+          <input
+            type='datetime-local'
+            value={startTime}
+            onChange={(e) => setStartTime(e.target.value)}
+            className='table-search'
+            aria-label='开始时间'
+          />
+          <input
+            type='datetime-local'
+            value={endTime}
+            onChange={(e) => setEndTime(e.target.value)}
+            className='table-search'
+            aria-label='结束时间'
+          />
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder='搜索用户名 / License Key / Host' className='table-search' />
         </div>
       </section>
 
       <section className='panel table-panel synopsys-table-panel'>
+        <div className='panel-header grouped-table-header'>
+          <div>
+            <p className='eyebrow'>活跃记录</p>
+            <h3>{filtered.length}</h3>
+          </div>
+          <span className='status-pill'>{loading ? 'Loading…' : 'Filtered'}</span>
+        </div>
         <div className='table-wrap'>
           <table className='data-table synopsys-table'>
             <thead>
@@ -75,7 +113,7 @@ export default function LicenseUsage() {
               ))}
             </tbody>
           </table>
-          {!filtered.length && <div className='empty-state padded'>当前没有活跃的 license usage 记录。</div>}
+          {!filtered.length && <div className='empty-state padded'>当前筛选条件下没有活跃的 license usage 记录。</div>}
         </div>
       </section>
     </div>
