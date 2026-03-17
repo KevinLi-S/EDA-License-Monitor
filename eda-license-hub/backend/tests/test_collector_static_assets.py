@@ -115,6 +115,24 @@ async def test_collect_single_persists_snapshot_and_static_assets(tmp_path):
     await engine.dispose()
 
 
+def test_discover_license_file_from_linux_lmstat_output(monkeypatch):
+    collector = CollectorService()
+    primary = '/eda/env/license/synopsys_lic01.dat'
+    secondary = '/eda/env/license/fallback.dat'
+
+    monkeypatch.setattr(
+        collector,
+        '_normalize_existing_path',
+        lambda value: value if value in {primary, secondary} else None,
+    )
+
+    raw_text = f'''\nLicense server status: 27000@lic01\n    License file(s) on lic01: {primary}:{secondary}:\n'''
+
+    discovered = collector._discover_license_file_from_lmstat(raw_text)
+
+    assert discovered == primary
+
+
 @pytest.mark.asyncio
 async def test_collect_single_deduplicates_log_events_across_runs(tmp_path):
     engine = create_async_engine('sqlite+aiosqlite:///:memory:', echo=False)

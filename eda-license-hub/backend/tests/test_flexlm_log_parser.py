@@ -39,3 +39,20 @@ TIMESTAMP 03/17/2026
     assert parsed.events[1].event_time == datetime(2026, 3, 17, 0, 5, 0, tzinfo=UTC)
     assert parsed.events[1].event_type == 'DENIED'
     assert parsed.events[1].username == 'bob'
+
+
+def test_parse_additional_log_event_types_and_start_date_markers():
+    raw_text = '''
+Start-Date: Mon Mar 16 2026
+09:00:00 (cdslmd) UNSUPPORTED: "Virtuoso" carol@ws03:0 Missing feature.
+09:10:00 (cdslmd) QUEUED: "Virtuoso" carol@ws03:0 Waiting in queue.
+'''
+    parser = FlexLMLogParser()
+
+    parsed = parser.parse(raw_text, reference_date=datetime(2026, 3, 15, 0, 0, tzinfo=UTC))
+
+    assert [event.event_type for event in parsed.events] == ['UNSUPPORTED', 'QUEUED']
+    assert parsed.events[0].event_time == datetime(2026, 3, 16, 9, 0, 0, tzinfo=UTC)
+    assert parsed.events[1].event_time == datetime(2026, 3, 16, 9, 10, 0, tzinfo=UTC)
+    assert parsed.events[0].feature_name == 'Virtuoso'
+    assert parsed.events[1].username == 'carol'

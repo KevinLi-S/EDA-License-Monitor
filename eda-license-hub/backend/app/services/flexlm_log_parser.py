@@ -7,11 +7,12 @@ from datetime import UTC, date, datetime
 
 
 EVENT_RE = re.compile(
-    r'^(?P<time>\d{1,2}:\d{2}:\d{2})\s+\((?P<vendor>[^)]+)\)\s+(?P<type>OUT|IN|DENIED):\s+"(?P<feature>[^"]+)"\s+(?P<identity>[^\s]+)(?:\s+(?P<tail>.*))?$',
+    r'^(?P<time>\d{1,2}:\d{2}:\d{2})\s+\((?P<vendor>[^)]+)\)\s+(?P<type>[A-Z][A-Z_-]*):\s+"(?P<feature>[^"]+)"\s+(?P<identity>[^\s]+)(?:\s+(?P<tail>.*))?$',
     re.IGNORECASE,
 )
 IDENTITY_RE = re.compile(r'(?P<user>[^@\s]+)@(?P<host>[^\s:]+)(?::(?P<display>.+))?')
 TIMESTAMP_RE = re.compile(r'^(?:\d{1,2}:\d{2}:\d{2}\s+\([^)]+\)\s+)?TIMESTAMP\s+(?P<date>.+)$', re.IGNORECASE)
+START_DATE_RE = re.compile(r'^Start-Date:\s*(?P<date>.+)$', re.IGNORECASE)
 DATE_TOKEN_RE = re.compile(r'(?P<value>\d{1,4}[/-]\d{1,2}[/-]\d{1,4})')
 
 
@@ -53,6 +54,13 @@ class FlexLMLogParser:
                     current_date = parsed_date
                 continue
 
+            start_date_match = START_DATE_RE.match(stripped)
+            if start_date_match:
+                parsed_date = self._parse_timestamp_date(start_date_match.group('date'))
+                if parsed_date is not None:
+                    current_date = parsed_date
+                continue
+
             match = EVENT_RE.match(stripped)
             if not match:
                 continue
@@ -79,12 +87,17 @@ class FlexLMLogParser:
 
     def _parse_timestamp_date(self, raw_value: str) -> date | None:
         match = DATE_TOKEN_RE.search(raw_value)
-        if not match:
-            return None
-        value = match.group('value')
-        for fmt in ('%m/%d/%Y', '%m-%d-%Y', '%d/%m/%Y', '%d-%m-%Y', '%Y/%m/%d', '%Y-%m-%d'):
+        if match:
+            value = match.group('value')
+            for fmt in ('%m/%d/%Y', '%m-%d-%Y', '%d/%m/%Y', '%d-%m-%Y', '%Y/%m/%d', '%Y-%m-%d'):
+                try:
+                    return datetime.strptime(value, fmt).date()
+                except ValueError:
+                    continue
+
+        for fmt in ('%a %b %d %Y', '%b %d %Y'):
             try:
-                return datetime.strptime(value, fmt).date()
+                return datetime.strptime(raw_value.strip(), fmt).date()
             except ValueError:
                 continue
         return None

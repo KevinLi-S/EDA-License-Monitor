@@ -27,7 +27,8 @@ from app.services.flexlm_parser import FlexLMParser, ServerSnapshot
 
 DEFAULT_LICENSE_DIR = Path('/eda/env/license')
 DEFAULT_LICENSE_LOG_DIR = DEFAULT_LICENSE_DIR / 'log'
-LMSTAT_LICENSE_PATH_RE = re.compile(r'License file\(s\) on [^:]+:\s*(?P<path>.+?\.(?:lic|dat|txt))(?::|\s*$)', re.IGNORECASE)
+LMSTAT_LICENSE_PATH_LINE_RE = re.compile(r'License file\(s\) on [^:]+:\s*(?P<paths>.+)$', re.IGNORECASE)
+LMSTAT_LICENSE_PATH_TOKEN_RE = re.compile(r'(/[^\s,;:]+\.(?:lic|dat|txt))', re.IGNORECASE)
 
 
 @dataclass
@@ -214,10 +215,18 @@ class CollectorService:
     def _discover_license_file_from_lmstat(self, raw_text: str | None) -> str | None:
         if not raw_text:
             return None
-        match = LMSTAT_LICENSE_PATH_RE.search(raw_text)
-        if not match:
-            return None
-        return self._normalize_existing_path(match.group('path').strip())
+
+        candidates: list[str] = []
+        for line in raw_text.splitlines():
+            match = LMSTAT_LICENSE_PATH_LINE_RE.search(line)
+            if not match:
+                continue
+            for token in LMSTAT_LICENSE_PATH_TOKEN_RE.findall(match.group('paths')):
+                normalized = self._normalize_existing_path(token.strip())
+                if normalized:
+                    candidates.append(normalized)
+
+        return candidates[0] if candidates else None
 
     def _path_match_tokens(self, server: LicenseServer) -> set[str]:
         values = [server.vendor, server.name, server.host, f'{server.vendor}_{server.host}' if server.vendor and server.host else None]
