@@ -21,13 +21,29 @@ function formatDateTime(value: string | null) {
   return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+function toApiDateTime(value: string) {
+  if (!value) return ''
+  return `${value}:00`
+}
+
 export default function UserRanking() {
   const [items, setItems] = useState<UserRankingRow[]>([])
   const [query, setQuery] = useState('')
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    apiGet<UserRankingRow[]>('/licenses/user-ranking?limit=200').then(setItems).catch(console.error)
-  }, [])
+    const params = new URLSearchParams({ limit: '200' })
+    if (startTime) params.set('start_time', toApiDateTime(startTime))
+    if (endTime) params.set('end_time', toApiDateTime(endTime))
+
+    setLoading(true)
+    apiGet<UserRankingRow[]>(`/licenses/user-ranking?${params.toString()}`)
+      .then(setItems)
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [startTime, endTime])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -43,14 +59,35 @@ export default function UserRanking() {
         <div>
           <p className='eyebrow'>用户排行</p>
           <h3>User Ranking</h3>
-          <p>基于当前 checkout 与历史日志事件统计用户活跃度、涉及 feature 数以及 denied 情况。</p>
+          <p>基于当前 checkout 与历史日志事件统计用户活跃度，支持按时间范围筛选排行结果。</p>
         </div>
-        <div className='search-strip'>
+        <div className='search-strip stacked-filters'>
+          <input
+            type='datetime-local'
+            value={startTime}
+            onChange={(e) => setStartTime(e.target.value)}
+            className='table-search'
+            aria-label='开始时间'
+          />
+          <input
+            type='datetime-local'
+            value={endTime}
+            onChange={(e) => setEndTime(e.target.value)}
+            className='table-search'
+            aria-label='结束时间'
+          />
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder='搜索用户 / Feature / Service' className='table-search' />
         </div>
       </section>
 
       <section className='panel table-panel synopsys-table-panel'>
+        <div className='panel-header grouped-table-header'>
+          <div>
+            <p className='eyebrow'>排行记录</p>
+            <h3>{filtered.length}</h3>
+          </div>
+          <span className='status-pill'>{loading ? 'Loading…' : 'Filtered'}</span>
+        </div>
         <div className='table-wrap'>
           <table className='data-table synopsys-table'>
             <thead>
@@ -80,7 +117,7 @@ export default function UserRanking() {
               ))}
             </tbody>
           </table>
-          {!filtered.length && <div className='empty-state padded'>当前没有可展示的用户排行数据。</div>}
+          {!filtered.length && <div className='empty-state padded'>当前筛选条件下没有可展示的用户排行数据。</div>}
         </div>
       </section>
     </div>
