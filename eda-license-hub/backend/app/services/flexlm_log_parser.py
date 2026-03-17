@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 
 EVENT_RE = re.compile(
@@ -11,6 +11,8 @@ EVENT_RE = re.compile(
     re.IGNORECASE,
 )
 IDENTITY_RE = re.compile(r'(?P<user>[^@\s]+)@(?P<host>[^\s:]+)(?::(?P<display>.+))?')
+TIMESTAMP_RE = re.compile(r'^(?:\d{1,2}:\d{2}:\d{2}\s+\([^)]+\)\s+)?TIMESTAMP\s+(?P<date>.+)$', re.IGNORECASE)
+DATE_TOKEN_RE = re.compile(r'(?P<value>\d{1,4}[/-]\d{1,2}[/-]\d{1,4})')
 
 
 @dataclass
@@ -37,15 +39,24 @@ class FlexLMLogParser:
     def parse(self, raw_text: str, *, reference_date: datetime | None = None) -> ParsedLicenseLog:
         parsed = ParsedLicenseLog(raw_text=raw_text)
         ref = reference_date or datetime.now(UTC)
+        current_date = ref.date()
 
         for line in raw_text.splitlines():
             stripped = line.strip()
             if not stripped:
                 continue
+
+            timestamp_match = TIMESTAMP_RE.match(stripped)
+            if timestamp_match:
+                parsed_date = self._parse_timestamp_date(timestamp_match.group('date'))
+                if parsed_date is not None:
+                    current_date = parsed_date
+                continue
+
             match = EVENT_RE.match(stripped)
             if not match:
                 continue
-            event_time = self._combine_time(ref, match.group('time'))
+            event_time = self._combine_time(current_date, ref, match.group('time'))
             identity_match = IDENTITY_RE.match(match.group('identity'))
             username = identity_match.group('user') if identity_match else None
             hostname = identity_match.group('host') if identity_match else None
@@ -66,12 +77,24 @@ class FlexLMLogParser:
 
         return parsed
 
-    def _combine_time(self, reference: datetime, clock_text: str) -> datetime | None:
+    def _parse_timestamp_date(self, raw_value: str) -> date | None:
+        match = DATE_TOKEN_RE.search(raw_value)
+        if not match:
+            return None
+        value = match.group('value')
+        for fmt in ('%m/%d/%Y', '%m-%d-%Y', '%d/%m/%Y', '%d-%m-%Y', '%Y/%m/%d', '%Y-%m-%d'):
+            try:
+                return datetime.strptime(value, fmt).date()
+            except ValueError:
+                continue
+        return None
+
+    def _combine_time(self, current_date: date, reference: datetime, clock_text: str) -> datetime | None:
         try:
             clock = datetime.strptime(clock_text, '%H:%M:%S').time()
         except ValueError:
             return None
-        return datetime.combine(reference.date(), clock, tzinfo=reference.tzinfo or UTC)
+        return datetime.combine(current_date, clock, tzinfo=reference.tzinfo or UTC)
 
     def _hash_line(self, raw_line: str) -> str:
         return hashlib.sha256(raw_line.encode('utf-8')).hexdigest()

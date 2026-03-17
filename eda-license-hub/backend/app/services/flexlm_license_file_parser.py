@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 
 
-SUPPORTED_RECORD_TYPES = {'SERVER', 'DAEMON', 'VENDOR', 'FEATURE', 'INCREMENT'}
+SUPPORTED_RECORD_TYPES = {'SERVER', 'DAEMON', 'VENDOR', 'FEATURE', 'INCREMENT', 'PACKAGE', 'UPGRADE', 'FEATURESET'}
 
 
 @dataclass

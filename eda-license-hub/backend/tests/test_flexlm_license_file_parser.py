@@ -49,3 +49,21 @@ FEATURE PRIMEPOWER snpslmd 2024.12 31-dec-2026 20 \
     assert len(parsed.grants) == 1
     assert parsed.grants[0].feature_name == 'PRIMEPOWER'
     assert parsed.grants[0].notice == 'multi line'
+
+
+def test_parse_additional_static_record_types():
+    raw_text = '''
+PACKAGE IC6_BASE cdslmd 23.10 31-dec-2026 0 COMPONENTS=Virtuoso
+UPGRADE VCS_MX snpslmd 2025.03 31-dec-2027 5 SN=UP123 NOTICE="upgrade grant"
+FEATURESET CALIBRE mgcld 2024.01 permanent 0
+'''
+    parser = FlexLMLicenseFileParser()
+
+    parsed = parser.parse(raw_text)
+
+    assert [grant.record_type for grant in parsed.grants] == ['PACKAGE', 'UPGRADE', 'FEATURESET']
+    assert parsed.grants[0].feature_name == 'IC6_BASE'
+    assert parsed.grants[1].serial_number == 'UP123'
+    assert parsed.grants[1].notice == 'upgrade grant'
+    assert parsed.grants[2].expiry_text == 'permanent'
+    assert parsed.grants[2].expiry_date is None

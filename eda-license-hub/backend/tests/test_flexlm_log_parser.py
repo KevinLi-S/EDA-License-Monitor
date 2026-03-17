@@ -21,3 +21,21 @@ def test_parse_log_events_out_in_denied():
     assert parsed.events[1].event_time is not None
     assert parsed.events[1].event_time.hour == 9
     assert len({event.event_hash for event in parsed.events}) == 3
+
+
+def test_parse_log_events_with_timestamp_date_markers():
+    raw_text = '''
+TIMESTAMP 03/16/2026
+09:15:00 (snpslmd) OUT: "VCS_Runtime" alice@ws01
+TIMESTAMP 03/17/2026
+00:05:00 (snpslmd) DENIED: "VCS_MX" bob@ws02:0.0 Licensed number of users already reached.
+'''
+    parser = FlexLMLogParser()
+
+    parsed = parser.parse(raw_text, reference_date=datetime(2026, 3, 15, 0, 0, tzinfo=UTC))
+
+    assert len(parsed.events) == 2
+    assert parsed.events[0].event_time == datetime(2026, 3, 16, 9, 15, 0, tzinfo=UTC)
+    assert parsed.events[1].event_time == datetime(2026, 3, 17, 0, 5, 0, tzinfo=UTC)
+    assert parsed.events[1].event_type == 'DENIED'
+    assert parsed.events[1].username == 'bob'
