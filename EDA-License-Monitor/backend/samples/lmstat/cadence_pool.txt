@@ -1,0 +1,14 @@
+License server status: 5280@sample-cadence
+    License file(s) on sample-cadence: /eda/env/license/cadence.dat:
+    sample-cadence: license server UP v11.18
+Vendor daemon status (on sample-cadence):
+    cdslmd: UP v11.18
+
+Users of Virtuoso_Multi_mode_Simulation:  (Total of 50 licenses issued;  Total of 22 licenses in use)
+    erin ana01 :0.0 (v11.18) (sample-cadence/5280 2001), start Thu 3/13 10:05
+
+Users of Innovus:  (Total of 35 licenses issued;  Total of 27 licenses in use)
+    frank pnr02 :0.0 (v11.18) (sample-cadence/5280 2002), start Thu 3/13 10:25
+
+Users of Xcelium:  (Total of 45 licenses issued;  Total of 12 licenses in use)
+    grace dv01 :0.0 (v11.18) (sample-cadence/5280 2003), start Thu 3/13 10:48
