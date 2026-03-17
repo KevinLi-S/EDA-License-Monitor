@@ -1,14 +1,19 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from sqlalchemy import Select, desc, func, select
+from sqlalchemy import Select, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models import LicenseCheckout, LicenseFeature, LicenseFileAsset, LicenseLogEvent, StaticLicenseGrant
+
+
+def _normalize_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value.replace(tzinfo=None) if value.tzinfo is not None else value
 
 
 @dataclass
@@ -78,8 +83,13 @@ async def list_license_log_events(
     username: str | None = None,
     event_type: str | None = None,
     vendor_daemon: str | None = None,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
     limit: int = 200,
 ) -> list[LicenseLogEvent]:
+    start_time = _normalize_datetime(start_time)
+    end_time = _normalize_datetime(end_time)
+
     stmt: Select[tuple[LicenseLogEvent]] = select(LicenseLogEvent).options(selectinload(LicenseLogEvent.server)).order_by(desc(LicenseLogEvent.event_time), desc(LicenseLogEvent.id))
     if server_id is not None:
         stmt = stmt.where(LicenseLogEvent.server_id == server_id)
@@ -91,6 +101,10 @@ async def list_license_log_events(
         stmt = stmt.where(LicenseLogEvent.event_type == event_type)
     if vendor_daemon:
         stmt = stmt.where(LicenseLogEvent.vendor_daemon == vendor_daemon)
+    if start_time is not None:
+        stmt = stmt.where(LicenseLogEvent.event_time.is_not(None), LicenseLogEvent.event_time >= start_time)
+    if end_time is not None:
+        stmt = stmt.where(LicenseLogEvent.event_time.is_not(None), LicenseLogEvent.event_time <= end_time)
     stmt = stmt.limit(max(1, min(limit, 1000)))
     return (await session.execute(stmt)).scalars().all()
 
@@ -99,8 +113,13 @@ async def get_feature_usage_aggregates(
     session: AsyncSession,
     *,
     server_id: int | None = None,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
     limit: int = 100,
 ) -> list[FeatureUsageAggregate]:
+    start_time = _normalize_datetime(start_time)
+    end_time = _normalize_datetime(end_time)
+
     aggregates: dict[tuple[str, str], FeatureUsageAggregate] = {}
 
     feature_stmt: Select[tuple[LicenseFeature]] = select(LicenseFeature).options(selectinload(LicenseFeature.server), selectinload(LicenseFeature.checkouts))
@@ -114,7 +133,13 @@ async def get_feature_usage_aggregates(
         aggregate = aggregates.setdefault(key, FeatureUsageAggregate(feature_name=feature.feature_name, vendor=vendor))
         if feature.server:
             aggregate.server_names.add(feature.server.name)
-        active_checkouts = [checkout for checkout in feature.checkouts if checkout.is_active]
+        active_checkouts = [
+            checkout
+            for checkout in feature.checkouts
+            if checkout.is_active
+            and (start_time is None or checkout.checkout_time >= start_time)
+            and (end_time is None or checkout.checkout_time <= end_time)
+        ]
         aggregate.current_checkout_count += len(active_checkouts)
         aggregate.current_users.update(checkout.username for checkout in active_checkouts if checkout.username)
         for checkout in active_checkouts:
@@ -124,6 +149,10 @@ async def get_feature_usage_aggregates(
     log_stmt: Select[tuple[LicenseLogEvent]] = select(LicenseLogEvent).options(selectinload(LicenseLogEvent.server))
     if server_id is not None:
         log_stmt = log_stmt.where(LicenseLogEvent.server_id == server_id)
+    if start_time is not None:
+        log_stmt = log_stmt.where(LicenseLogEvent.event_time.is_not(None), LicenseLogEvent.event_time >= start_time)
+    if end_time is not None:
+        log_stmt = log_stmt.where(LicenseLogEvent.event_time.is_not(None), LicenseLogEvent.event_time <= end_time)
     events = (await session.execute(log_stmt)).scalars().all()
 
     for event in events:
@@ -157,8 +186,13 @@ async def get_user_usage_ranking(
     session: AsyncSession,
     *,
     server_id: int | None = None,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
     limit: int = 100,
 ) -> list[UserUsageAggregate]:
+    start_time = _normalize_datetime(start_time)
+    end_time = _normalize_datetime(end_time)
+
     aggregates: dict[str, UserUsageAggregate] = {}
 
     checkout_stmt: Select[tuple[LicenseCheckout]] = (
@@ -171,6 +205,10 @@ async def get_user_usage_ranking(
     checkouts = (await session.execute(checkout_stmt)).scalars().all()
 
     for checkout in checkouts:
+        if start_time is not None and checkout.checkout_time < start_time:
+            continue
+        if end_time is not None and checkout.checkout_time > end_time:
+            continue
         username = checkout.username or 'unknown'
         aggregate = aggregates.setdefault(username, UserUsageAggregate(username=username))
         aggregate.current_checkout_count += 1
@@ -184,6 +222,10 @@ async def get_user_usage_ranking(
     event_stmt: Select[tuple[LicenseLogEvent]] = select(LicenseLogEvent).options(selectinload(LicenseLogEvent.server))
     if server_id is not None:
         event_stmt = event_stmt.where(LicenseLogEvent.server_id == server_id)
+    if start_time is not None:
+        event_stmt = event_stmt.where(LicenseLogEvent.event_time.is_not(None), LicenseLogEvent.event_time >= start_time)
+    if end_time is not None:
+        event_stmt = event_stmt.where(LicenseLogEvent.event_time.is_not(None), LicenseLogEvent.event_time <= end_time)
     events = (await session.execute(event_stmt)).scalars().all()
 
     for event in events:

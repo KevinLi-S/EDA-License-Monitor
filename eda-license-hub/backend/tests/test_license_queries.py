@@ -140,7 +140,10 @@ async def test_license_query_endpoints():
             events_resp = await client.get('/api/v1/licenses/log-events', params={'limit': 10})
             events_filtered_resp = await client.get('/api/v1/licenses/log-events', params={'event_type': 'DENIED', 'vendor_daemon': 'snpslmd', 'limit': 10})
             feature_usage_resp = await client.get('/api/v1/licenses/feature-usage')
+            feature_usage_time_resp = await client.get('/api/v1/licenses/feature-usage', params={'start_time': '2026-03-16T10:06:00Z', 'end_time': '2026-03-16T10:06:00Z'})
+            usage_time_resp = await client.get('/api/v1/licenses/usage', params={'start_time': '2026-03-16T10:00:00Z', 'end_time': '2026-03-16T10:00:00Z'})
             user_ranking_resp = await client.get('/api/v1/licenses/user-ranking')
+            user_ranking_time_resp = await client.get('/api/v1/licenses/user-ranking', params={'start_time': '2026-03-16T10:06:00Z', 'end_time': '2026-03-16T10:06:00Z'})
 
         assert asset_resp.status_code == 200
         assert grants_resp.status_code == 200
@@ -148,7 +151,10 @@ async def test_license_query_endpoints():
         assert events_resp.status_code == 200
         assert events_filtered_resp.status_code == 200
         assert feature_usage_resp.status_code == 200
+        assert feature_usage_time_resp.status_code == 200
+        assert usage_time_resp.status_code == 200
         assert user_ranking_resp.status_code == 200
+        assert user_ranking_time_resp.status_code == 200
 
         asset_rows = asset_resp.json()
         grant_rows = grants_resp.json()
@@ -156,7 +162,10 @@ async def test_license_query_endpoints():
         event_rows = events_resp.json()
         filtered_event_rows = events_filtered_resp.json()
         feature_usage_rows = feature_usage_resp.json()
+        feature_usage_time_rows = feature_usage_time_resp.json()
+        usage_time_rows = usage_time_resp.json()
         ranking_rows = user_ranking_resp.json()
+        ranking_time_rows = user_ranking_time_resp.json()
 
         assert asset_rows[0]['source_path'] == '/eda/env/license/synopsys_lic01.dat'
         assert grant_rows[0]['feature_name'] == 'VCS_MX'
@@ -169,9 +178,16 @@ async def test_license_query_endpoints():
         assert feature_usage_rows[0]['log_users'] == ['alice', 'bob']
         assert feature_usage_rows[0]['unique_user_count'] == 2
         assert feature_usage_rows[0]['denied_events'] == 1
+        assert feature_usage_time_rows[0]['feature_name'] == 'VCS_MX'
+        assert feature_usage_time_rows[0]['current_checkout_count'] == 0
+        assert feature_usage_time_rows[0]['denied_events'] == 1
+        assert usage_time_rows[0]['username'] == 'alice'
         assert ranking_rows[0]['username'] == 'alice'
         assert ranking_rows[0]['current_checkout_count'] == 1
         assert ranking_rows[0]['feature_names'] == ['VCS_MX']
+        assert ranking_time_rows[0]['username'] == 'bob'
+        assert ranking_time_rows[0]['current_checkout_count'] == 0
+        assert ranking_time_rows[0]['denied_events'] == 1
     finally:
         app.dependency_overrides.pop(get_session, None)
         await engine.dispose()

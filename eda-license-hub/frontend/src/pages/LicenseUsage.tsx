@@ -39,8 +39,8 @@ export default function LicenseUsage() {
       <section className='section-header-card synopsys-like'>
         <div>
           <p className='eyebrow'>使用页面</p>
-          <h3>License Key Usage</h3>
-          <p>展示当前活跃 checkout 用户、客户端主机以及最后使用时间，风格参考 Synopsys Web Portal。</p>
+          <h3>License Usage</h3>
+          <p>只展示当前有使用中的 license，按活跃 checkout 展示用户、客户端主机以及最后使用时间。</p>
         </div>
         <div className='search-strip'>
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder='搜索用户名 / License Key / Host' className='table-search' />

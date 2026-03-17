@@ -6,7 +6,6 @@ import Alerts from './pages/Alerts'
 import Analytics from './pages/Analytics'
 import LicenseKeys from './pages/LicenseKeys'
 import LicenseUsage from './pages/LicenseUsage'
-import FeatureUsage from './pages/FeatureUsage'
 import UserRanking from './pages/UserRanking'
 
 export default function App() {
@@ -19,7 +18,6 @@ export default function App() {
           <Route path='servers' element={<Servers />} />
           <Route path='license-keys' element={<LicenseKeys />} />
           <Route path='license-usage' element={<LicenseUsage />} />
-          <Route path='feature-usage' element={<FeatureUsage />} />
           <Route path='user-ranking' element={<UserRanking />} />
           <Route path='alerts' element={<Alerts />} />
           <Route path='analytics' element={<Analytics />} />

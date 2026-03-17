@@ -12,8 +12,7 @@ const sections = [
     title: 'License',
     items: [
       { path: '/license-keys', label: 'License Keys', icon: '⌘', description: 'Key catalog and issued capacity' },
-      { path: '/license-usage', label: 'License Usage', icon: '◎', description: 'Active user and hostname usage' },
-      { path: '/feature-usage', label: 'Feature Usage', icon: '◈', description: 'Who is using which feature' },
+      { path: '/license-usage', label: 'License Usage', icon: '◎', description: 'Only licenses currently in use' },
       { path: '/user-ranking', label: 'User Ranking', icon: '☷', description: 'Most active users and usage ranking' },
     ],
   },
