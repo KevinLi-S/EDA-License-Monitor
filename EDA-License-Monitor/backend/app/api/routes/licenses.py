@@ -22,6 +22,7 @@ from app.schemas.license import (
     StaticLicenseGrantSummary,
     UserUsageRankingSummary,
 )
+from app.services.collector_service import collector_service
 from app.services.license_query_service import (
     get_feature_usage_aggregates,
     get_user_usage_ranking,
@@ -55,6 +56,16 @@ async def get_license_keys(session: AsyncSession = Depends(get_session)) -> list
         )
         for feature in features
     ]
+
+
+@router.post('/usage/refresh')
+async def refresh_license_usage(session: AsyncSession = Depends(get_session)) -> dict:
+    results = await collector_service.refresh_log_usage(session)
+    return {
+        'status': 'ok',
+        'mode': 'log-usage-refresh',
+        'results': [result.__dict__ for result in results],
+    }
 
 
 @router.get('/usage', response_model=list[LicenseUsageSummary])

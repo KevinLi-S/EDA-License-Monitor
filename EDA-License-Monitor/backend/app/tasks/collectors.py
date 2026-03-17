@@ -9,7 +9,7 @@ def collect_license_snapshots() -> dict:
 
     async def _run() -> dict:
         async with AsyncSessionLocal() as session:
-            results = await collector_service.collect_all(session)
-            return {'status': 'ok', 'results': [result.__dict__ for result in results]}
+            results = await collector_service.collect_all(session, parallel=True)
+            return {'status': 'ok', 'mode': 'baseline-5min', 'results': [result.__dict__ for result in results]}
 
     return asyncio.run(_run())

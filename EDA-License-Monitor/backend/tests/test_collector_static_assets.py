@@ -119,8 +119,8 @@ async def test_collect_single_persists_snapshot_and_static_assets(tmp_path):
                 .order_by(LicenseCheckout.username)
             )
         ).scalars().all()
-        assert len(checkouts) == 2
-        assert [checkout.username for checkout in checkouts] == ['alice', 'bob']
+        assert len(checkouts) == 1
+        assert checkouts[0].username == 'alice'
 
     await engine.dispose()
 

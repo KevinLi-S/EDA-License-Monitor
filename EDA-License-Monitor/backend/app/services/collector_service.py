@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
+from app.database import AsyncSessionLocal
 from app.models import (
     LicenseCheckout,
     LicenseFeature,
@@ -47,7 +48,17 @@ class CollectorService:
         self.license_file_parser = FlexLMLicenseFileParser()
         self.log_parser = FlexLMLogParser()
 
-    async def collect_all(self, session: AsyncSession) -> list[CollectorResult]:
+    async def collect_all(
+        self,
+        session: AsyncSession,
+        *,
+        sync_static_assets: bool = True,
+        parallel: bool = False,
+    ) -> list[CollectorResult]:
+        if parallel:
+            server_ids = await self._list_active_server_ids(session)
+            return await self._collect_server_ids(server_ids, sync_static_assets=sync_static_assets)
+
         stmt = (
             select(LicenseServer)
             .options(selectinload(LicenseServer.license_file_asset))
@@ -57,18 +68,61 @@ class CollectorService:
         servers = (await session.execute(stmt)).scalars().all()
         results: list[CollectorResult] = []
         for server in servers:
-            results.append(await self.collect_server(session, server))
+            results.append(await self.collect_server(session, server, sync_static_assets=sync_static_assets))
         await session.commit()
         return results
 
-    async def collect_single(self, session: AsyncSession, server_id: int) -> CollectorResult:
+    async def collect_single(self, session: AsyncSession, server_id: int, *, sync_static_assets: bool = True) -> CollectorResult:
         stmt = select(LicenseServer).options(selectinload(LicenseServer.license_file_asset)).where(LicenseServer.id == server_id)
         server = (await session.execute(stmt)).scalar_one()
-        result = await self.collect_server(session, server)
+        result = await self.collect_server(session, server, sync_static_assets=sync_static_assets)
         await session.commit()
         return result
 
-    async def collect_server(self, session: AsyncSession, server: LicenseServer) -> CollectorResult:
+    async def collect_realtime_usage(self, session: AsyncSession) -> list[CollectorResult]:
+        server_ids = await self._list_active_server_ids(session)
+        return await self._collect_server_ids(server_ids, sync_static_assets=False)
+
+    async def refresh_log_usage(self, session: AsyncSession) -> list[CollectorResult]:
+        server_ids = await self._list_active_server_ids(session)
+        if not server_ids:
+            return []
+
+        async def _refresh_one(server_id: int) -> CollectorResult:
+            async with AsyncSessionLocal() as isolated_session:
+                stmt = (
+                    select(LicenseServer)
+                    .options(selectinload(LicenseServer.license_file_asset))
+                    .where(LicenseServer.id == server_id)
+                )
+                server = (await isolated_session.execute(stmt)).scalar_one()
+                try:
+                    license_log_path = self._resolve_license_log_path(server)
+                    if not license_log_path:
+                        server.log_parse_error = None
+                        await isolated_session.commit()
+                        feature_count = await self._count_server_features(isolated_session, server.id)
+                        return CollectorResult(server.id, server.name, server.last_status or 'unknown', feature_count, server.source_type)
+
+                    parsed_log = await self._persist_license_log(isolated_session, server, license_log_path)
+                    await self._rebuild_active_usage_from_logs(
+                        isolated_session,
+                        server,
+                        parsed_log,
+                        update_feature_totals=False,
+                    )
+                    await isolated_session.commit()
+                    feature_count = await self._count_server_features(isolated_session, server.id)
+                    return CollectorResult(server.id, server.name, server.last_status or 'ok', feature_count, server.source_type)
+                except Exception as exc:
+                    server.log_parse_error = str(exc)
+                    await isolated_session.commit()
+                    feature_count = await self._count_server_features(isolated_session, server.id)
+                    return CollectorResult(server.id, server.name, 'down', feature_count, server.source_type, str(exc))
+
+        return list(await asyncio.gather(*(_refresh_one(server_id) for server_id in server_ids)))
+
+    async def collect_server(self, session: AsyncSession, server: LicenseServer, *, sync_static_assets: bool = True) -> CollectorResult:
         raw_text: str | None = None
         snapshot = None
         snapshot_error: Exception | None = None
@@ -82,12 +136,13 @@ class CollectorService:
             server.last_status = 'down'
             server.last_error = str(exc)
 
-        await self._sync_optional_static_assets(
-            session,
-            server,
-            raw_text=raw_text,
-            rebuild_usage_from_logs=snapshot is None,
-        )
+        if sync_static_assets:
+            await self._sync_optional_static_assets(
+                session,
+                server,
+                raw_text=raw_text,
+                rebuild_usage_from_logs=snapshot is None,
+            )
 
         feature_count = await self._count_server_features(session, server.id)
         if snapshot is not None:
@@ -155,19 +210,6 @@ class CollectorService:
             feature.raw_block = feature_snapshot.raw_block
             seen_names.add(feature.feature_name)
 
-            await session.execute(delete(LicenseCheckout).where(LicenseCheckout.feature_id == feature.id))
-            for checkout in feature_snapshot.checkouts:
-                session.add(LicenseCheckout(
-                    feature_id=feature.id,
-                    username=checkout.username,
-                    hostname=checkout.hostname,
-                    display=checkout.display,
-                    process_info=checkout.process_info,
-                    checkout_time=checkout.checkout_time,
-                    server_handle=checkout.server_handle,
-                    is_active=True,
-                ))
-
             session.add(LicenseUsageHistory(
                 feature_id=feature.id,
                 timestamp=snapshot.collected_at,
@@ -201,8 +243,12 @@ class CollectorService:
         if license_log_path:
             try:
                 parsed_log = await self._persist_license_log(session, server, license_log_path)
-                if rebuild_usage_from_logs:
-                    await self._rebuild_active_usage_from_logs(session, server, parsed_log)
+                await self._rebuild_active_usage_from_logs(
+                    session,
+                    server,
+                    parsed_log,
+                    update_feature_totals=rebuild_usage_from_logs,
+                )
             except Exception as exc:
                 server.log_parse_error = str(exc)
         if not license_log_path:
@@ -319,7 +365,19 @@ class CollectorService:
         asset.last_parsed_at = parsed.parsed_at
 
         await session.execute(delete(StaticLicenseGrant).where(StaticLicenseGrant.server_id == server.id))
+        seen_identity: set[tuple[str, str, str | None, object | None, str | None]] = set()
         for grant in parsed.grants:
+            identity = (
+                grant.feature_name,
+                grant.record_type,
+                grant.version,
+                grant.expiry_date,
+                grant.serial_number,
+            )
+            if identity in seen_identity:
+                continue
+            seen_identity.add(identity)
+
             session.add(StaticLicenseGrant(
                 server_id=server.id,
                 license_file_asset_id=asset.id,
@@ -369,7 +427,14 @@ class CollectorService:
         server.log_parse_error = None
         return parsed
 
-    async def _rebuild_active_usage_from_logs(self, session: AsyncSession, server: LicenseServer, parsed_log) -> None:
+    async def _rebuild_active_usage_from_logs(
+        self,
+        session: AsyncSession,
+        server: LicenseServer,
+        parsed_log,
+        *,
+        update_feature_totals: bool = False,
+    ) -> None:
         feature_stmt = select(LicenseFeature).where(LicenseFeature.server_id == server.id)
         features = (await session.execute(feature_stmt)).scalars().all()
         feature_map = {feature.feature_name: feature for feature in features}
@@ -394,8 +459,8 @@ class CollectorService:
                 active_stack[key].pop()
 
         await session.flush()
-        for feature in list(feature_map.values()):
-            await session.execute(delete(LicenseCheckout).where(LicenseCheckout.feature_id == feature.id))
+        feature_ids_subquery = select(LicenseFeature.id).where(LicenseFeature.server_id == server.id)
+        await session.execute(delete(LicenseCheckout).where(LicenseCheckout.feature_id.in_(feature_ids_subquery)))
 
         active_count_by_feature: dict[str, int] = {}
         for (feature_name, username, hostname), stack in active_stack.items():
@@ -429,11 +494,30 @@ class CollectorService:
                 ))
             active_count_by_feature[feature_name] = active_count_by_feature.get(feature_name, 0) + len(stack)
 
-        for feature in feature_map.values():
-            used = active_count_by_feature.get(feature.feature_name, 0)
-            feature.used_licenses = used
-            feature.available_licenses = max((feature.total_licenses or 0) - used, 0)
-            feature.usage_percentage = (used / feature.total_licenses * 100) if feature.total_licenses else 0
+        if update_feature_totals:
+            for feature in feature_map.values():
+                used = active_count_by_feature.get(feature.feature_name, 0)
+                feature.used_licenses = used
+                feature.available_licenses = max((feature.total_licenses or 0) - used, 0)
+                feature.usage_percentage = (used / feature.total_licenses * 100) if feature.total_licenses else 0
+
+    async def _list_active_server_ids(self, session: AsyncSession) -> list[int]:
+        stmt = (
+            select(LicenseServer.id)
+            .where(LicenseServer.status == 'active')
+            .order_by(LicenseServer.id)
+        )
+        return list((await session.execute(stmt)).scalars().all())
+
+    async def _collect_server_ids(self, server_ids: list[int], *, sync_static_assets: bool) -> list[CollectorResult]:
+        if not server_ids:
+            return []
+
+        async def _collect_one(server_id: int) -> CollectorResult:
+            async with AsyncSessionLocal() as isolated_session:
+                return await self.collect_single(isolated_session, server_id, sync_static_assets=sync_static_assets)
+
+        return list(await asyncio.gather(*(_collect_one(server_id) for server_id in server_ids)))
 
     async def _count_server_features(self, session: AsyncSession, server_id: int) -> int:
         stmt = select(LicenseFeature.id).where(LicenseFeature.server_id == server_id)

@@ -18,7 +18,7 @@ celery_app.conf.update(
     beat_schedule={
         'collect-license-snapshots': {
             'task': 'app.tasks.collectors.collect_license_snapshots',
-            'schedule': 30.0,
+            'schedule': 300.0,
         },
         'evaluate-alerts': {
             'task': 'app.tasks.alerts.evaluate_alerts',

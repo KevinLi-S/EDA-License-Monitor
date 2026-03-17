@@ -16,8 +16,9 @@ async def get_servers(session: AsyncSession = Depends(get_session)) -> list[Serv
 
 @router.post('/refresh')
 async def refresh_servers(session: AsyncSession = Depends(get_session)) -> dict:
-    results = await collector_service.collect_all(session)
+    results = await collector_service.collect_all(session, parallel=True)
     return {
         'status': 'ok',
+        'mode': 'baseline-collection',
         'results': [result.__dict__ for result in results],
     }

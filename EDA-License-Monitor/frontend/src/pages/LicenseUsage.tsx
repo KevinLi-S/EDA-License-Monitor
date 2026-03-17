@@ -66,7 +66,7 @@ export default function LicenseUsage() {
     setRefreshing(true)
     setRefreshMessage('正在立即采集当前 license 使用状态…')
     try {
-      await apiPost('/servers/refresh')
+      await apiPost('/licenses/usage/refresh')
       await load()
       setRefreshMessage('立即刷新完成。')
     } catch (error) {
