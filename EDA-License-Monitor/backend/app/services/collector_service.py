@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import select as select_module
 import shlex
+import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -177,6 +181,110 @@ class CollectorService:
         if proc.returncode != 0:
             raise RuntimeError(stderr.decode('utf-8', errors='ignore') or f'lmutil exit code {proc.returncode}')
         return stdout.decode('utf-8', errors='ignore')
+
+    async def _run_lmutil_command(self, executable: str, args: list[str]) -> str:
+        if os.name == 'nt':
+            proc = await asyncio.create_subprocess_exec(
+                executable,
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=settings.collector_timeout_seconds)
+            if proc.returncode != 0:
+                raise RuntimeError(stderr.decode('utf-8', errors='ignore') or f'lmutil exit code {proc.returncode}')
+            return stdout.decode('utf-8', errors='ignore')
+
+        stdout, returncode = await asyncio.to_thread(
+            self._run_lmutil_with_pty_sync,
+            executable,
+            args,
+            settings.collector_timeout_seconds,
+        )
+        if stdout.strip():
+            return stdout
+        if returncode not in (0, None):
+            raise RuntimeError(stdout or f'lmutil exit code {returncode}')
+        return stdout
+
+    def _run_lmutil_with_pty_sync(self, executable: str, args: list[str], timeout_seconds: int | float) -> tuple[str, int | None]:
+        import pty
+
+        master_fd, slave_fd = pty.openpty()
+        env = os.environ.copy()
+        env.setdefault('TERM', 'xterm')
+        env.setdefault('LINES', '50')
+        env.setdefault('COLUMNS', '160')
+        proc = subprocess.Popen(
+            [executable, *args],
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            close_fds=True,
+            env=env,
+        )
+        os.close(slave_fd)
+
+        chunks: list[bytes] = []
+        deadline = time.monotonic() + float(timeout_seconds)
+        try:
+            while time.monotonic() < deadline:
+                ready, _, _ = select_module.select([master_fd], [], [], 0.2)
+                if master_fd in ready:
+                    try:
+                        data = os.read(master_fd, 4096)
+                    except OSError:
+                        break
+                    if not data:
+                        break
+                    chunks.append(data)
+                if proc.poll() is not None:
+                    break
+
+            if proc.poll() is None:
+                proc.terminate()
+                time.sleep(0.5)
+                if proc.poll() is None:
+                    proc.kill()
+
+            while True:
+                ready, _, _ = select_module.select([master_fd], [], [], 0)
+                if master_fd not in ready:
+                    break
+                try:
+                    data = os.read(master_fd, 4096)
+                except OSError:
+                    break
+                if not data:
+                    break
+                chunks.append(data)
+        finally:
+            os.close(master_fd)
+
+        return b''.join(chunks).decode('utf-8', errors='ignore'), proc.returncode
+
+    def _build_lmutil_hostname_fallback_args(self, server: LicenseServer, args: list[str]) -> list[str]:
+        hostname = None
+        if server.license_file_asset and server.license_file_asset.server_name:
+            hostname = server.license_file_asset.server_name.strip()
+        if not hostname or hostname == server.host:
+            return args
+
+        expected_target = f'{server.port}@{server.host}' if server.port and server.host else None
+        replacement_target = f'{server.port}@{hostname}' if server.port else hostname
+
+        patched = list(args)
+        for idx, token in enumerate(patched):
+            if expected_target and token == expected_target:
+                patched[idx] = replacement_target
+                return patched
+            if expected_target and expected_target in token:
+                patched[idx] = token.replace(expected_target, replacement_target)
+                return patched
+
+        if not patched:
+            return ['lmstat', '-a', '-c', replacement_target]
+        return patched
 
     async def _persist_snapshot(self, session: AsyncSession, server: LicenseServer, snapshot: ServerSnapshot) -> None:
         server.last_status = snapshot.status
@@ -435,18 +543,6 @@ class CollectorService:
         *,
         update_feature_totals: bool = False,
     ) -> None:
-        feature_stmt = select(LicenseFeature).where(LicenseFeature.server_id == server.id)
-        features = (await session.execute(feature_stmt)).scalars().all()
-        feature_map = {feature.feature_name: feature for feature in features}
-
-        grant_stmt = select(StaticLicenseGrant).where(StaticLicenseGrant.server_id == server.id)
-        static_grants = (await session.execute(grant_stmt)).scalars().all()
-        grant_total_by_feature: dict[str, int] = {}
-        for grant in static_grants:
-            if not grant.feature_name or grant.quantity is None:
-                continue
-            grant_total_by_feature[grant.feature_name] = max(grant_total_by_feature.get(grant.feature_name, 0), int(grant.quantity))
-
         active_stack: dict[tuple[str, str, str], list] = {}
         for event in parsed_log.events:
             if event.event_type not in {'OUT', 'IN'} or not event.feature_name or not event.username or not event.hostname:
@@ -457,6 +553,31 @@ class CollectorService:
                 active_stack[key].append(event)
             elif active_stack[key]:
                 active_stack[key].pop()
+
+        active_feature_names = sorted({feature_name for (feature_name, _, _), stack in active_stack.items() if stack})
+
+        if update_feature_totals:
+            feature_stmt = select(LicenseFeature).where(LicenseFeature.server_id == server.id)
+            features = (await session.execute(feature_stmt)).scalars().all()
+            feature_map = {feature.feature_name: feature for feature in features}
+
+            grant_stmt = select(StaticLicenseGrant).where(StaticLicenseGrant.server_id == server.id)
+            static_grants = (await session.execute(grant_stmt)).scalars().all()
+            grant_total_by_feature: dict[str, int] = {}
+            for grant in static_grants:
+                if not grant.feature_name or grant.quantity is None:
+                    continue
+                grant_total_by_feature[grant.feature_name] = max(grant_total_by_feature.get(grant.feature_name, 0), int(grant.quantity))
+        else:
+            feature_map: dict[str, LicenseFeature] = {}
+            if active_feature_names:
+                feature_stmt = select(LicenseFeature).where(
+                    LicenseFeature.server_id == server.id,
+                    LicenseFeature.feature_name.in_(active_feature_names),
+                )
+                features = (await session.execute(feature_stmt)).scalars().all()
+                feature_map = {feature.feature_name: feature for feature in features}
+            grant_total_by_feature = {}
 
         await session.flush()
         feature_ids_subquery = select(LicenseFeature.id).where(LicenseFeature.server_id == server.id)
