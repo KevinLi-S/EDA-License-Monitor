@@ -104,9 +104,17 @@ async def get_license_file_assets(
 async def get_static_license_grants(
     server_id: int | None = Query(default=None),
     feature_name: str | None = Query(default=None),
+    vendor_name: str | None = Query(default=None),
+    record_type: str | None = Query(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> list[StaticLicenseGrantSummary]:
-    grants = await list_static_license_grants(session, server_id=server_id, feature_name=feature_name)
+    grants = await list_static_license_grants(
+        session,
+        server_id=server_id,
+        feature_name=feature_name,
+        vendor_name=vendor_name,
+        record_type=record_type,
+    )
     return [
         StaticLicenseGrantSummary(
             id=grant.id,
@@ -134,6 +142,8 @@ async def get_log_events(
     server_id: int | None = Query(default=None),
     feature_name: str | None = Query(default=None),
     username: str | None = Query(default=None),
+    event_type: str | None = Query(default=None),
+    vendor_daemon: str | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=1000),
     session: AsyncSession = Depends(get_session),
 ) -> list[LicenseLogEventSummary]:
@@ -142,6 +152,8 @@ async def get_log_events(
         server_id=server_id,
         feature_name=feature_name,
         username=username,
+        event_type=event_type,
+        vendor_daemon=vendor_daemon,
         limit=limit,
     )
     return [

@@ -51,6 +51,8 @@ async def list_static_license_grants(
     *,
     server_id: int | None = None,
     feature_name: str | None = None,
+    vendor_name: str | None = None,
+    record_type: str | None = None,
 ) -> list[StaticLicenseGrant]:
     stmt: Select[tuple[StaticLicenseGrant]] = (
         select(StaticLicenseGrant)
@@ -61,6 +63,10 @@ async def list_static_license_grants(
         stmt = stmt.where(StaticLicenseGrant.server_id == server_id)
     if feature_name:
         stmt = stmt.where(StaticLicenseGrant.feature_name == feature_name)
+    if vendor_name:
+        stmt = stmt.where(StaticLicenseGrant.vendor_name == vendor_name)
+    if record_type:
+        stmt = stmt.where(StaticLicenseGrant.record_type == record_type)
     return (await session.execute(stmt)).scalars().all()
 
 
@@ -70,6 +76,8 @@ async def list_license_log_events(
     server_id: int | None = None,
     feature_name: str | None = None,
     username: str | None = None,
+    event_type: str | None = None,
+    vendor_daemon: str | None = None,
     limit: int = 200,
 ) -> list[LicenseLogEvent]:
     stmt: Select[tuple[LicenseLogEvent]] = select(LicenseLogEvent).options(selectinload(LicenseLogEvent.server)).order_by(desc(LicenseLogEvent.event_time), desc(LicenseLogEvent.id))
@@ -79,6 +87,10 @@ async def list_license_log_events(
         stmt = stmt.where(LicenseLogEvent.feature_name == feature_name)
     if username:
         stmt = stmt.where(LicenseLogEvent.username == username)
+    if event_type:
+        stmt = stmt.where(LicenseLogEvent.event_type == event_type)
+    if vendor_daemon:
+        stmt = stmt.where(LicenseLogEvent.vendor_daemon == vendor_daemon)
     stmt = stmt.limit(max(1, min(limit, 1000)))
     return (await session.execute(stmt)).scalars().all()
 

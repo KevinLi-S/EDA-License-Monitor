@@ -68,17 +68,30 @@ async def test_license_query_endpoints():
             session.add(asset)
             await session.flush()
 
-            session.add(StaticLicenseGrant(
-                server_id=server.id,
-                license_file_asset_id=asset.id,
-                record_type='INCREMENT',
-                vendor_name='snpslmd',
-                feature_name='VCS_MX',
-                version='2025.03',
-                quantity=20,
-                serial_number='S123',
-                raw_record='INCREMENT VCS_MX snpslmd 2025.03 31-dec-2026 20',
-            ))
+            session.add_all([
+                StaticLicenseGrant(
+                    server_id=server.id,
+                    license_file_asset_id=asset.id,
+                    record_type='INCREMENT',
+                    vendor_name='snpslmd',
+                    feature_name='VCS_MX',
+                    version='2025.03',
+                    quantity=20,
+                    serial_number='S123',
+                    raw_record='INCREMENT VCS_MX snpslmd 2025.03 31-dec-2026 20',
+                ),
+                StaticLicenseGrant(
+                    server_id=server.id,
+                    license_file_asset_id=asset.id,
+                    record_type='FEATURE',
+                    vendor_name='otherd',
+                    feature_name='TEMP_FEATURE',
+                    version='1.0',
+                    quantity=5,
+                    serial_number='S999',
+                    raw_record='FEATURE TEMP_FEATURE otherd 1.0 31-dec-2026 5',
+                ),
+            ])
 
             session.add_all([
                 LicenseLogEvent(
@@ -105,31 +118,52 @@ async def test_license_query_endpoints():
                     event_hash='hash-denied',
                     raw_line='10:06:00 (snpslmd) DENIED: "VCS_MX" bob@ws02:0',
                 ),
+                LicenseLogEvent(
+                    server_id=server.id,
+                    event_type='OUT',
+                    event_time=datetime(2026, 3, 16, 10, 7, tzinfo=UTC),
+                    vendor_daemon='otherd',
+                    feature_name='TEMP_FEATURE',
+                    username='charlie',
+                    hostname='ws03',
+                    display=':1',
+                    event_hash='hash-out-other',
+                    raw_line='10:07:00 (otherd) OUT: "TEMP_FEATURE" charlie@ws03:1',
+                ),
             ])
             await session.commit()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
             asset_resp = await client.get('/api/v1/licenses/file-assets')
             grants_resp = await client.get('/api/v1/licenses/static-grants', params={'feature_name': 'VCS_MX'})
+            grants_filtered_resp = await client.get('/api/v1/licenses/static-grants', params={'vendor_name': 'snpslmd', 'record_type': 'INCREMENT'})
             events_resp = await client.get('/api/v1/licenses/log-events', params={'limit': 10})
+            events_filtered_resp = await client.get('/api/v1/licenses/log-events', params={'event_type': 'DENIED', 'vendor_daemon': 'snpslmd', 'limit': 10})
             feature_usage_resp = await client.get('/api/v1/licenses/feature-usage')
             user_ranking_resp = await client.get('/api/v1/licenses/user-ranking')
 
         assert asset_resp.status_code == 200
         assert grants_resp.status_code == 200
+        assert grants_filtered_resp.status_code == 200
         assert events_resp.status_code == 200
+        assert events_filtered_resp.status_code == 200
         assert feature_usage_resp.status_code == 200
         assert user_ranking_resp.status_code == 200
 
         asset_rows = asset_resp.json()
         grant_rows = grants_resp.json()
+        filtered_grant_rows = grants_filtered_resp.json()
         event_rows = events_resp.json()
+        filtered_event_rows = events_filtered_resp.json()
         feature_usage_rows = feature_usage_resp.json()
         ranking_rows = user_ranking_resp.json()
 
         assert asset_rows[0]['source_path'] == '/eda/env/license/synopsys_lic01.dat'
         assert grant_rows[0]['feature_name'] == 'VCS_MX'
-        assert event_rows[0]['event_type'] == 'DENIED'
+        assert filtered_grant_rows == [grant_rows[0]]
+        assert event_rows[0]['event_type'] == 'OUT'
+        assert filtered_event_rows[0]['event_type'] == 'DENIED'
+        assert filtered_event_rows[0]['vendor_daemon'] == 'snpslmd'
         assert feature_usage_rows[0]['feature_name'] == 'VCS_MX'
         assert feature_usage_rows[0]['current_users'] == ['alice']
         assert feature_usage_rows[0]['log_users'] == ['alice', 'bob']
