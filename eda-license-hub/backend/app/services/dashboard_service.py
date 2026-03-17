@@ -49,7 +49,10 @@ async def list_servers(session: AsyncSession) -> list[ServerSummary]:
 
 
 async def list_alerts(session: AsyncSession) -> list[AlertSummary]:
-    stmt = select(LicenseServer).where(LicenseServer.last_status == 'down').order_by(LicenseServer.id)
+    stmt = select(LicenseServer).where(
+        LicenseServer.last_status == 'down',
+        LicenseServer.vendor.not_in(['synopsys', 'cadence', 'mentor', 'ansys'])
+    ).order_by(LicenseServer.id)
     servers = (await session.execute(stmt)).scalars().all()
     now = datetime.now(UTC)
     return [
