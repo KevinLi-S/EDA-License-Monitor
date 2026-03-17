@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { apiGet } from '../services/api'
+import { apiGet, apiPost } from '../services/api'
 
 type LicenseUsageRow = {
   id: number
@@ -29,19 +29,54 @@ export default function LicenseUsage() {
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshMessage, setRefreshMessage] = useState('')
 
-  useEffect(() => {
+  const load = async () => {
     const params = new URLSearchParams()
     if (startTime) params.set('start_time', toApiDateTime(startTime))
     if (endTime) params.set('end_time', toApiDateTime(endTime))
     const queryString = params.toString()
 
-    setLoading(true)
-    apiGet<LicenseUsageRow[]>(`/licenses/usage${queryString ? `?${queryString}` : ''}`)
-      .then(setItems)
-      .catch(console.error)
-      .finally(() => setLoading(false))
+    const rows = await apiGet<LicenseUsageRow[]>(`/licenses/usage${queryString ? `?${queryString}` : ''}`)
+    setItems(rows)
+  }
+
+  useEffect(() => {
+    let cancelled = false
+
+    const poll = () => {
+      setLoading(true)
+      load()
+        .catch(console.error)
+        .finally(() => {
+          if (!cancelled) setLoading(false)
+        })
+    }
+
+    poll()
+    const timer = window.setInterval(poll, 30000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
   }, [startTime, endTime])
+
+  async function refreshNow() {
+    setRefreshing(true)
+    setRefreshMessage('正在立即采集当前 license 使用状态…')
+    try {
+      await apiPost('/servers/refresh')
+      await load()
+      setRefreshMessage('立即刷新完成。')
+    } catch (error) {
+      console.error(error)
+      setRefreshMessage('立即刷新失败，请稍后再试。')
+    } finally {
+      setRefreshing(false)
+      window.setTimeout(() => setRefreshMessage(''), 4000)
+    }
+  }
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -60,6 +95,9 @@ export default function LicenseUsage() {
           <p>只展示当前有使用中的 license，支持按时间范围筛选活跃 checkout 记录。</p>
         </div>
         <div className='search-strip stacked-filters'>
+          <button type='button' className='header-button primary' onClick={refreshNow} disabled={refreshing}>
+            {refreshing ? '立即刷新中…' : '立即刷新'}
+          </button>
           <input
             type='datetime-local'
             value={startTime}
@@ -76,6 +114,7 @@ export default function LicenseUsage() {
           />
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder='搜索用户名 / License Key / Host' className='table-search' />
         </div>
+        {refreshMessage && <p className='eyebrow'>{refreshMessage}</p>}
       </section>
 
       <section className='panel table-panel synopsys-table-panel'>

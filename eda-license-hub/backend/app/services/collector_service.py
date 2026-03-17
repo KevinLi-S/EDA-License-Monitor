@@ -28,7 +28,7 @@ from app.services.flexlm_parser import FlexLMParser, ServerSnapshot
 DEFAULT_LICENSE_DIR = Path('/eda/env/license')
 DEFAULT_LICENSE_LOG_DIR = DEFAULT_LICENSE_DIR / 'log'
 LMSTAT_LICENSE_PATH_LINE_RE = re.compile(r'License file\(s\) on [^:]+:\s*(?P<paths>.+)$', re.IGNORECASE)
-LMSTAT_LICENSE_PATH_TOKEN_RE = re.compile(r'(/[^\s,;:]+\.(?:lic|dat|txt))', re.IGNORECASE)
+LMSTAT_LICENSE_PATH_TOKEN_RE = re.compile(r'((?:[A-Za-z]:[\\/]|/)[^\s,;]+?\.(?:lic|dat|txt))', re.IGNORECASE)
 
 
 @dataclass
@@ -69,16 +69,32 @@ class CollectorService:
         return result
 
     async def collect_server(self, session: AsyncSession, server: LicenseServer) -> CollectorResult:
+        raw_text: str | None = None
+        snapshot = None
+        snapshot_error: Exception | None = None
+
         try:
             raw_text = await self._fetch_raw_output(server)
             snapshot = self.parser.parse(raw_text)
             await self._persist_snapshot(session, server, snapshot)
-            await self._sync_optional_static_assets(session, server, raw_text=raw_text)
-            return CollectorResult(server.id, server.name, snapshot.status, len(snapshot.features), server.source_type)
         except Exception as exc:
+            snapshot_error = exc
             server.last_status = 'down'
             server.last_error = str(exc)
-            return CollectorResult(server.id, server.name, 'down', 0, server.source_type, str(exc))
+
+        await self._sync_optional_static_assets(
+            session,
+            server,
+            raw_text=raw_text,
+            rebuild_usage_from_logs=snapshot is None,
+        )
+
+        feature_count = await self._count_server_features(session, server.id)
+        if snapshot is not None:
+            return CollectorResult(server.id, server.name, snapshot.status, feature_count, server.source_type)
+        if feature_count > 0 and server.log_last_parsed_at is not None:
+            return CollectorResult(server.id, server.name, 'degraded', feature_count, server.source_type, str(snapshot_error) if snapshot_error else None)
+        return CollectorResult(server.id, server.name, 'down', feature_count, server.source_type, str(snapshot_error) if snapshot_error else None)
 
     async def _fetch_raw_output(self, server: LicenseServer) -> str:
         if server.source_type == 'sample_file':
@@ -151,6 +167,7 @@ class CollectorService:
                     server_handle=checkout.server_handle,
                     is_active=True,
                 ))
+
             session.add(LicenseUsageHistory(
                 feature_id=feature.id,
                 timestamp=snapshot.collected_at,
@@ -163,7 +180,14 @@ class CollectorService:
             if feature.feature_name not in seen_names:
                 await session.delete(feature)
 
-    async def _sync_optional_static_assets(self, session: AsyncSession, server: LicenseServer, *, raw_text: str | None = None) -> None:
+    async def _sync_optional_static_assets(
+        self,
+        session: AsyncSession,
+        server: LicenseServer,
+        *,
+        raw_text: str | None = None,
+        rebuild_usage_from_logs: bool = False,
+    ) -> None:
         license_file_path = self._resolve_license_file_path(server, raw_text=raw_text)
         if license_file_path:
             try:
@@ -176,7 +200,9 @@ class CollectorService:
         license_log_path = self._resolve_license_log_path(server)
         if license_log_path:
             try:
-                await self._persist_license_log(session, server, license_log_path)
+                parsed_log = await self._persist_license_log(session, server, license_log_path)
+                if rebuild_usage_from_logs:
+                    await self._rebuild_active_usage_from_logs(session, server, parsed_log)
             except Exception as exc:
                 server.log_parse_error = str(exc)
         if not license_log_path:
@@ -314,15 +340,16 @@ class CollectorService:
         server.static_grants_last_parsed_at = parsed.parsed_at
         server.static_grants_parse_error = None
 
-    async def _persist_license_log(self, session: AsyncSession, server: LicenseServer, license_log_path: str) -> None:
+    async def _persist_license_log(self, session: AsyncSession, server: LicenseServer, license_log_path: str):
         raw_text = self._read_text_file(license_log_path)
         parsed = self.log_parser.parse(raw_text)
 
         existing_hashes = set(
             (await session.execute(select(LicenseLogEvent.event_hash).where(LicenseLogEvent.server_id == server.id))).scalars().all()
         )
+        seen_hashes = set(existing_hashes)
         for event in parsed.events:
-            if event.event_hash in existing_hashes:
+            if event.event_hash in seen_hashes:
                 continue
             session.add(LicenseLogEvent(
                 server_id=server.id,
@@ -336,9 +363,81 @@ class CollectorService:
                 event_hash=event.event_hash,
                 raw_line=event.raw_line,
             ))
+            seen_hashes.add(event.event_hash)
 
         server.log_last_parsed_at = parsed.parsed_at
         server.log_parse_error = None
+        return parsed
+
+    async def _rebuild_active_usage_from_logs(self, session: AsyncSession, server: LicenseServer, parsed_log) -> None:
+        feature_stmt = select(LicenseFeature).where(LicenseFeature.server_id == server.id)
+        features = (await session.execute(feature_stmt)).scalars().all()
+        feature_map = {feature.feature_name: feature for feature in features}
+
+        grant_stmt = select(StaticLicenseGrant).where(StaticLicenseGrant.server_id == server.id)
+        static_grants = (await session.execute(grant_stmt)).scalars().all()
+        grant_total_by_feature: dict[str, int] = {}
+        for grant in static_grants:
+            if not grant.feature_name or grant.quantity is None:
+                continue
+            grant_total_by_feature[grant.feature_name] = max(grant_total_by_feature.get(grant.feature_name, 0), int(grant.quantity))
+
+        active_stack: dict[tuple[str, str, str], list] = {}
+        for event in parsed_log.events:
+            if event.event_type not in {'OUT', 'IN'} or not event.feature_name or not event.username or not event.hostname:
+                continue
+            key = (event.feature_name, event.username, event.hostname)
+            active_stack.setdefault(key, [])
+            if event.event_type == 'OUT':
+                active_stack[key].append(event)
+            elif active_stack[key]:
+                active_stack[key].pop()
+
+        await session.flush()
+        for feature in list(feature_map.values()):
+            await session.execute(delete(LicenseCheckout).where(LicenseCheckout.feature_id == feature.id))
+
+        active_count_by_feature: dict[str, int] = {}
+        for (feature_name, username, hostname), stack in active_stack.items():
+            if not stack:
+                continue
+            feature = feature_map.get(feature_name)
+            if feature is None:
+                total_licenses = grant_total_by_feature.get(feature_name, 0)
+                feature = LicenseFeature(
+                    server_id=server.id,
+                    feature_name=feature_name,
+                    vendor=server.vendor,
+                    total_licenses=total_licenses,
+                    used_licenses=0,
+                    available_licenses=max(total_licenses, 0),
+                    usage_percentage=0,
+                )
+                session.add(feature)
+                await session.flush()
+                feature_map[feature_name] = feature
+            for event in stack:
+                session.add(LicenseCheckout(
+                    feature_id=feature.id,
+                    username=username,
+                    hostname=hostname,
+                    display=event.display,
+                    process_info=event.raw_line,
+                    checkout_time=event.event_time,
+                    server_handle=None,
+                    is_active=True,
+                ))
+            active_count_by_feature[feature_name] = active_count_by_feature.get(feature_name, 0) + len(stack)
+
+        for feature in feature_map.values():
+            used = active_count_by_feature.get(feature.feature_name, 0)
+            feature.used_licenses = used
+            feature.available_licenses = max((feature.total_licenses or 0) - used, 0)
+            feature.usage_percentage = (used / feature.total_licenses * 100) if feature.total_licenses else 0
+
+    async def _count_server_features(self, session: AsyncSession, server_id: int) -> int:
+        stmt = select(LicenseFeature.id).where(LicenseFeature.server_id == server_id)
+        return len((await session.execute(stmt)).scalars().all())
 
     def _read_text_file(self, file_path: str | None) -> str:
         if not file_path:

@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.database import Base
-from app.models import LicenseFeature, LicenseFileAsset, LicenseLogEvent, LicenseServer, StaticLicenseGrant
+from app.models import LicenseCheckout, LicenseFeature, LicenseFileAsset, LicenseLogEvent, LicenseServer, StaticLicenseGrant
 from app.services.collector_service import CollectorService
 
 
@@ -112,6 +112,16 @@ async def test_collect_single_persists_snapshot_and_static_assets(tmp_path):
         assert events[0].event_time.minute == 15
         assert events[1].username == 'bob'
 
+        checkouts = (
+            await session.execute(
+                select(LicenseCheckout)
+                .where(LicenseCheckout.feature_id == features[0].id)
+                .order_by(LicenseCheckout.username)
+            )
+        ).scalars().all()
+        assert len(checkouts) == 2
+        assert [checkout.username for checkout in checkouts] == ['alice', 'bob']
+
     await engine.dispose()
 
 
@@ -204,5 +214,160 @@ async def test_collect_single_deduplicates_log_events_across_runs(tmp_path):
 
         assert len(event_count) == 2
         assert len(grant_count) == 1
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_collect_single_ignores_duplicate_event_hashes_within_same_log_parse(tmp_path):
+    engine = create_async_engine('sqlite+aiosqlite:///:memory:', echo=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    sample_path = tmp_path / 'synopsys_dup_real.txt'
+    license_file_path = tmp_path / 'synopsys_dup.dat'
+    log_path = tmp_path / 'synopsys_dup.log'
+
+    sample_path.write_text(
+        '\n'.join([
+            'License server status: 27000@lic01',
+            '    License file(s) on lic01: ' + str(license_file_path),
+            'lic01: license server UP v11.19',
+            'snpslmd: UP v11.19',
+            'Users of PrimeTime:  (Total of 10 licenses issued;  Total of 1 licenses in use)',
+            '    root lic01 :0 (pt/27000 100) start Tue 3/17 09:00',
+        ]),
+        encoding='utf-8',
+    )
+    license_file_path.write_text(
+        '\n'.join([
+            'SERVER lic01 001122334455 27000',
+            'VENDOR snpslmd /eda/env/license/snpslmd',
+            'INCREMENT PrimeTime snpslmd 2025.03 31-dec-2026 10 START=15-feb-2024 SN=ABC123',
+        ]),
+        encoding='utf-8',
+    )
+    log_path.write_text(
+        '\n'.join([
+            'TIMESTAMP 03/17/2026',
+            '14:24:30 (snpslmd) OUT: "PrimeTime" rt_probe6@ws-rt6:0',
+            '14:24:30 (snpslmd) OUT: "PrimeTime" rt_probe6@ws-rt6:0',
+            '14:25:00 (snpslmd) IN: "PrimeTime" rt_probe6@ws-rt6:0',
+        ]),
+        encoding='utf-8',
+    )
+
+    async with session_factory() as session:
+        server = LicenseServer(
+            name='Synopsys Dup',
+            vendor='synopsys',
+            host='lic01',
+            port=27000,
+            source_type='sample_file',
+            sample_path=str(sample_path),
+            license_file_path=str(license_file_path),
+            license_log_path=str(log_path),
+        )
+        session.add(server)
+        await session.commit()
+        server_id = server.id
+
+    collector = CollectorService()
+
+    async with session_factory() as session:
+        result = await collector.collect_single(session, server_id)
+        assert result.status == 'up'
+
+        events = (
+            await session.execute(
+                select(LicenseLogEvent)
+                .where(LicenseLogEvent.server_id == server_id)
+                .order_by(LicenseLogEvent.event_time, LicenseLogEvent.id)
+            )
+        ).scalars().all()
+        assert len(events) == 2
+        assert [event.event_type for event in events] == ['OUT', 'IN']
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_collect_single_rebuilds_active_usage_from_logs_when_snapshot_fails(tmp_path):
+    engine = create_async_engine('sqlite+aiosqlite:///:memory:', echo=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    license_file_path = tmp_path / 'mentor_lic01.dat'
+    log_path = tmp_path / 'mentor_lic01.log'
+
+    license_file_path.write_text(
+        '\n'.join([
+            'SERVER lic01 001122334455 29000',
+            'VENDOR saltd /eda/env/license/saltd',
+            'INCREMENT Calibre saltd 2025.03 31-dec-2026 4 START=15-feb-2024 SN=XYZ789',
+        ]),
+        encoding='utf-8',
+    )
+    log_path.write_text(
+        '\n'.join([
+            'TIMESTAMP 03/17/2026',
+            '11:00:00 (saltd) OUT: "Calibre" dave@ws10:0',
+            '11:05:00 (saltd) OUT: "Calibre" erin@ws11:0',
+            '11:10:00 (saltd) IN: "Calibre" erin@ws11:0',
+        ]),
+        encoding='utf-8',
+    )
+
+    async with session_factory() as session:
+        server = LicenseServer(
+            name='Mentor Main',
+            vendor='mentor',
+            host='lic01',
+            port=29000,
+            source_type='lmutil',
+            lmutil_path='missing-lmutil',
+            license_file_path=str(license_file_path),
+            license_log_path=str(log_path),
+        )
+        session.add(server)
+        await session.commit()
+        server_id = server.id
+
+    collector = CollectorService()
+
+    async with session_factory() as session:
+        result = await collector.collect_single(session, server_id)
+
+        assert result.status == 'degraded'
+        assert result.feature_count == 1
+
+        refreshed_server = await session.get(LicenseServer, server_id)
+        assert refreshed_server is not None
+        assert refreshed_server.last_status == 'down'
+        assert refreshed_server.log_parse_error is None
+        assert refreshed_server.static_grants_parse_error is None
+
+        feature = (
+            await session.execute(select(LicenseFeature).where(LicenseFeature.server_id == server_id))
+        ).scalar_one()
+        assert feature.feature_name == 'Calibre'
+        assert feature.total_licenses == 4
+        assert feature.used_licenses == 1
+        assert feature.available_licenses == 3
+
+        checkouts = (
+            await session.execute(
+                select(LicenseCheckout)
+                .where(LicenseCheckout.feature_id == feature.id)
+                .order_by(LicenseCheckout.username)
+            )
+        ).scalars().all()
+        assert len(checkouts) == 1
+        assert checkouts[0].username == 'dave'
+        assert checkouts[0].hostname == 'ws10'
 
     await engine.dispose()
