@@ -17,6 +17,7 @@ export default function LicenseKeys() {
   const [items, setItems] = useState<LicenseKey[]>([])
   const [query, setQuery] = useState('')
   const [vendor, setVendor] = useState('all')
+  const [hideUnused, setHideUnused] = useState(true)
 
   useEffect(() => {
     apiGet<LicenseKey[]>('/licenses/keys').then(setItems).catch(console.error)
@@ -28,11 +29,12 @@ export default function LicenseKeys() {
     const q = query.trim().toLowerCase()
     return items.filter((item) => {
       const matchesVendor = vendor === 'all' || item.vendor === vendor
+      const matchesUsage = !hideUnused || item.used > 0
       const matchesQuery =
         !q || [item.key_name, item.vendor, item.server_name, item.version || ''].some((value) => value.toLowerCase().includes(q))
-      return matchesVendor && matchesQuery
+      return matchesVendor && matchesUsage && matchesQuery
     })
-  }, [items, query, vendor])
+  }, [items, query, vendor, hideUnused])
 
   const grouped = useMemo(() => {
     return filtered.reduce<Record<string, LicenseKey[]>>((acc, item) => {
@@ -53,7 +55,7 @@ export default function LicenseKeys() {
         <div>
           <p className='eyebrow'>许可证页面</p>
           <h3>License Keys</h3>
-          <p>参考 Synopsys Web License 管理界面的信息布局，按厂商分组展示各个 feature 的发放量、使用量与剩余量。</p>
+          <p>按厂商分组展示 feature 的发放量、使用量与剩余量，并支持隐藏当前未使用的 license。</p>
         </div>
         <div className='search-strip stacked-filters'>
           <select value={vendor} onChange={(e) => setVendor(e.target.value)} className='table-search'>
@@ -63,6 +65,10 @@ export default function LicenseKeys() {
               </option>
             ))}
           </select>
+          <label className='toggle-filter'>
+            <input type='checkbox' checked={hideUnused} onChange={(e) => setHideUnused(e.target.checked)} />
+            <span>隐藏未使用（used = 0）</span>
+          </label>
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder='搜索 License Keys / Service' className='table-search' />
         </div>
       </section>
